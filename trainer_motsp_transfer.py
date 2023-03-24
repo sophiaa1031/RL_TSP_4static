@@ -136,7 +136,7 @@ def train(actor, critic, w1, w2, task, num_nodes, train_data, valid_data, reward
 
     checkpoint_dir = os.path.join(save_dir, 'checkpoints')
     if not os.path.exists(checkpoint_dir):
-         os.makedirs(checkpoint_dir)
+        os.makedirs(checkpoint_dir)
 
     actor_optim = optim.Adam(actor.parameters(), lr=actor_lr)
     critic_optim = optim.Adam(critic.parameters(), lr=critic_lr)
