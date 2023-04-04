@@ -18,7 +18,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader
 
-from model import DRL4TSP, Encoder
+from model_fl import DRL4TSP
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 # device = torch.device('cpu')
@@ -34,13 +34,12 @@ class StateCritic(nn.Module):
     def __init__(self, static_size, dynamic_size, hidden_size):
         super(StateCritic, self).__init__()
 
-        self.static_encoder = Encoder(static_size, hidden_size)
-        self.dynamic_encoder = Encoder(dynamic_size, hidden_size)
+        self.static_encoder = nn.Linear(static_size, hidden_size)
+        self.dynamic_encoder = nn.Linear(dynamic_size, hidden_size)
 
         # Define the encoder & decoder models
-        self.fc1 = nn.Conv1d(hidden_size * 2, 20, kernel_size=1)
-        self.fc2 = nn.Conv1d(20, 20, kernel_size=1)
-        self.fc3 = nn.Conv1d(20, 1, kernel_size=1)
+        self.fc1 = nn.Linear(hidden_size*2, 32)
+        self.fc2 = nn.Linear(32, 1)
 
         for p in self.parameters():
             if len(p.shape) > 1:
@@ -49,43 +48,17 @@ class StateCritic(nn.Module):
     def forward(self, static, dynamic):
 
         # Use the probabilities of visiting each
-        static_hidden = self.static_encoder(static)
-        dynamic_hidden = self.dynamic_encoder(dynamic)
+        static_hidden = self.static_encoder(static.view(batch_size,-1))
+        dynamic_hidden = self.dynamic_encoder(dynamic.view(batch_size,-1))
 
         hidden = torch.cat((static_hidden, dynamic_hidden), 1)
 
         output = F.relu(self.fc1(hidden))
-        output = F.relu(self.fc2(output))
-        output = self.fc3(output).sum(dim=2)
+        output = self.fc2(output)
         return output
 
 
-class Critic(nn.Module):
-    """Estimates the problem complexity.
-
-    This is a basic module that just looks at the log-probabilities predicted by
-    the encoder + decoder, and returns an estimate of complexity
-    """
-
-    def __init__(self, hidden_size):
-        super(Critic, self).__init__()
-
-        # Define the encoder & decoder models
-        self.fc1 = nn.Conv1d(1, hidden_size, kernel_size=1)
-        self.fc2 = nn.Conv1d(hidden_size, 20, kernel_size=1)
-        self.fc3 = nn.Conv1d(20, 1, kernel_size=1)
-
-        for p in self.parameters():
-            if len(p.shape) > 1:
-                nn.init.xavier_uniform_(p)
-
-    def forward(self, input):
-
-        output = F.relu(self.fc1(input.unsqueeze(1)))
-        output = F.relu(self.fc2(output)).squeeze(2)
-        output = self.fc3(output).sum(dim=2)
-        return output
-
+# def update_fn(action,y):
 
 def validate(data_loader, actor, reward_fn, w1, w2, render_fn=None, save_dir='.',
              num_plot=5):
@@ -149,7 +122,7 @@ def train(actor, critic, w1, w2, task, num_nodes, train_data, valid_data, reward
     start_total = time.time()
     for epoch in range(3):
         print("epoch %d start:"% epoch)
-        actor.train()
+        actor.train()  #   model train -> dropout   training ->dropout 随机丢弃掉一些神经元0.3    testing  dropout 值*0.3
         critic.train()
 
         times, losses, rewards, critic_rewards = [], [], [], []
@@ -167,7 +140,7 @@ def train(actor, critic, w1, w2, task, num_nodes, train_data, valid_data, reward
             x0 = x0.to(device) if len(x0) > 0 else None
 
             # Full forward pass through the dataset
-            tour_indices, tour_logp = actor(static, dynamic, x0)
+            tour_indices, tour_logp = actor(static, dynamic)   #  actor.forward(static, dynamic, x0)
 
             # Sum the log probabilities for each city in the tour
             reward, obj1, obj2 = reward_fn(static, tour_indices, w1, w2)
@@ -260,10 +233,10 @@ def train_tsp(args, w1=1, w2=0, checkpoint = None):
     # TSP100, 8.44
 
     from tasks import motsp
-    from tasks.motsp import TSPDataset
+    from tasks.mofl import TSPDataset
 
-    STATIC_SIZE = 4 # (x, y)
-    DYNAMIC_SIZE = 1 # dummy for compatibility
+    STATIC_SIZE = 2*args.num_nodes # (x, y)
+    DYNAMIC_SIZE = 5*args.num_nodes # dummy for compatibility
 
     train_data = TSPDataset(args.num_nodes, args.train_size, args.seed)
     valid_data = TSPDataset(args.num_nodes, args.valid_size, args.seed + 1)
@@ -305,78 +278,78 @@ def train_tsp(args, w1=1, w2=0, checkpoint = None):
     print('w1=%2.2f,w2=%2.2f. Average tour length: ' % (w1, w2), out)
 
 
-def train_vrp(args):
-
-    # Goals from paper:
-    # VRP10, Capacity 20:  4.84  (Greedy)
-    # VRP20, Capacity 30:  6.59  (Greedy)
-    # VRP50, Capacity 40:  11.39 (Greedy)
-    # VRP100, Capacity 50: 17.23  (Greedy)
-
-    from tasks import vrp
-    from tasks.vrp import VehicleRoutingDataset
-
-    # Determines the maximum amount of load for a vehicle based on num nodes
-    LOAD_DICT = {10: 20, 20: 30, 50: 40, 100: 50}
-    MAX_DEMAND = 9
-    STATIC_SIZE = 2 # (x, y)
-    DYNAMIC_SIZE = 2 # (load, demand)
-
-    max_load = LOAD_DICT[args.num_nodes]
-
-    train_data = VehicleRoutingDataset(args.train_size,
-                                       args.num_nodes,
-                                       max_load,
-                                       MAX_DEMAND,
-                                       args.seed)
-
-    valid_data = VehicleRoutingDataset(args.valid_size,
-                                       args.num_nodes,
-                                       max_load,
-                                       MAX_DEMAND,
-                                       args.seed + 1)
-
-    actor = DRL4TSP(STATIC_SIZE,
-                    DYNAMIC_SIZE,
-                    args.hidden_size,
-                    train_data.update_dynamic,
-                    train_data.update_mask,
-                    args.num_layers,
-                    args.dropout).to(device)
-
-    critic = StateCritic(STATIC_SIZE, DYNAMIC_SIZE, args.hidden_size).to(device)
-
-    kwargs = vars(args)
-    kwargs['train_data'] = train_data
-    kwargs['valid_data'] = valid_data
-    kwargs['reward_fn'] = vrp.reward
-    kwargs['render_fn'] = vrp.render
-
-    if args.checkpoint:
-        path = os.path.join(args.checkpoint, 'actor.pt')
-        actor.load_state_dict(torch.load(path, device))
-
-        path = os.path.join(args.checkpoint, 'critic.pt')
-        critic.load_state_dict(torch.load(path, device))
-
-    if not args.test:
-        train(actor, critic, **kwargs)
-
-    test_data = VehicleRoutingDataset(args.valid_size,
-                                      args.num_nodes,
-                                      max_load,
-                                      MAX_DEMAND,
-                                      args.seed + 2)
-
-    test_dir = 'test'
-    test_loader = DataLoader(test_data, args.batch_size, False, num_workers=0)
-    out = validate(test_loader, actor, vrp.reward, vrp.render, test_dir, num_plot=5)
-
-    print('Average tour length: ', out)
+# def train_vrp(args):
+#
+#     # Goals from paper:
+#     # VRP10, Capacity 20:  4.84  (Greedy)
+#     # VRP20, Capacity 30:  6.59  (Greedy)
+#     # VRP50, Capacity 40:  11.39 (Greedy)
+#     # VRP100, Capacity 50: 17.23  (Greedy)
+#
+#     from tasks import vrp
+#     from tasks.vrp import VehicleRoutingDataset
+#
+#     # Determines the maximum amount of load for a vehicle based on num nodes
+#     LOAD_DICT = {10: 20, 20: 30, 50: 40, 100: 50}
+#     MAX_DEMAND = 9
+#     STATIC_SIZE = 2 # (x, y)
+#     DYNAMIC_SIZE = 2 # (load, demand)
+#
+#     max_load = LOAD_DICT[args.num_nodes]
+#
+#     train_data = VehicleRoutingDataset(args.train_size,
+#                                        args.num_nodes,
+#                                        max_load,
+#                                        MAX_DEMAND,
+#                                        args.seed)
+#
+#     valid_data = VehicleRoutingDataset(args.valid_size,
+#                                        args.num_nodes,
+#                                        max_load,
+#                                        MAX_DEMAND,
+#                                        args.seed + 1)
+#
+#     actor = DRL4TSP(STATIC_SIZE,
+#                     DYNAMIC_SIZE,
+#                     args.hidden_size,
+#                     train_data.update_dynamic,
+#                     train_data.update_mask,
+#                     args.num_layers,
+#                     args.dropout).to(device)
+#
+#     critic = StateCritic(STATIC_SIZE, DYNAMIC_SIZE, args.hidden_size).to(device)
+#
+#     kwargs = vars(args)
+#     kwargs['train_data'] = train_data
+#     kwargs['valid_data'] = valid_data
+#     kwargs['reward_fn'] = vrp.reward
+#     kwargs['render_fn'] = vrp.render
+#
+#     if args.checkpoint:
+#         path = os.path.join(args.checkpoint, 'actor.pt')
+#         actor.load_state_dict(torch.load(path, device))
+#
+#         path = os.path.join(args.checkpoint, 'critic.pt')
+#         critic.load_state_dict(torch.load(path, device))
+#
+#     if not args.test:
+#         train(actor, critic, **kwargs)
+#
+#     test_data = VehicleRoutingDataset(args.valid_size,
+#                                       args.num_nodes,
+#                                       max_load,
+#                                       MAX_DEMAND,
+#                                       args.seed + 2)
+#
+#     test_dir = 'test'
+#     test_loader = DataLoader(test_data, args.batch_size, False, num_workers=0)
+#     out = validate(test_loader, actor, vrp.reward, vrp.render, test_dir, num_plot=5)
+#
+#     print('Average tour length: ', out)
 
 
 if __name__ == '__main__':
-    num_nodes = 100
+    num_nodes = 20
     parser = argparse.ArgumentParser(description='Combinatorial Optimization')
     parser.add_argument('--seed', default=12345, type=int)
     # parser.add_argument('--checkpoint', default="tsp/20/w_1_0/20_06_30.888074")
@@ -390,13 +363,13 @@ if __name__ == '__main__':
     parser.add_argument('--hidden', dest='hidden_size', default=128, type=int)
     parser.add_argument('--dropout', default=0.1, type=float)
     parser.add_argument('--layers', dest='num_layers', default=1, type=int)
-    parser.add_argument('--train-size',default=120000, type=int)
+    parser.add_argument('--train-size',default=1000, type=int)
     parser.add_argument('--valid-size', default=1000, type=int)
 
     args = parser.parse_args()
 
 
-    T = 100
+    T = 5
     if args.task == 'tsp':
         w2_list = np.arange(T+1)/T
         for i in range(0,T+1):
@@ -405,7 +378,7 @@ if __name__ == '__main__':
                 # The first subproblem can be trained from scratch. It also can be trained based on a
                 # single-TSP trained model, where the model can be obtained from everywhere in github
                 checkpoint = 'tsp_transfer_100run_500000_5epoch_40city/40/w_1.00_0.00'
-                train_tsp(args, 1, 0, checkpoint)
+                train_tsp(args, 1, 0, None)
             else:
                 # Parameter transfer. train based on the parameters of the previous subproblem
                 checkpoint = 'tsp_transfer/%d/w_%2.2f_%2.2f'%(num_nodes, 1-w2_list[i-1], w2_list[i-1])

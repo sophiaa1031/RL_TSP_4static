@@ -20,7 +20,7 @@ import matplotlib.pyplot as plt
 
 class TSPDataset(Dataset):
 
-    def __init__(self, size=50, num_samples=1e6, seed=None):
+    def __init__(self, size=10, num_samples=1e6, seed=None):
         super(TSPDataset, self).__init__()
 
         if seed is None:
@@ -28,8 +28,10 @@ class TSPDataset(Dataset):
 
         np.random.seed(seed)
         torch.manual_seed(seed)
-        self.dataset = torch.rand((num_samples, 4, size))
-        self.dynamic = torch.zeros(num_samples, 1, size)
+        p = 0.09*torch.rand((num_samples, 1, size)) + 0.01  #p [0.01,0.1]
+        f = 1*torch.rand((num_samples, 1, size)) + 2  #f [2,3]
+        self.dataset = torch.cat([p, f], 1) #（samples, (q,f), cars number）
+        self.dynamic = torch.zeros(num_samples, 5, size)  #（samples, (q,a,b,prob,time), cars number）
         self.num_nodes = size
         self.size = num_samples
 
