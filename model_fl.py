@@ -61,10 +61,12 @@ class Actor(nn.Module):
                 logp_select = prob_select.log()
 
 
-            #update
+            # save the maximum latency in the last iteration
             dynamic_1,_ = torch.max(0.005*ptr_quant + 0.01*ptr_quant/b.squeeze(),dim=1)#(batch_size)
             dynamic_1 = dynamic_1.unsqueeze(1)#(batch_size,1)
+            # update the current travel distance
             dynamic_2 = torch.mul(dynamic_1,static[:,:,2,step])+ dynamic[:, :, 1, step]
+            # update the distance from the RSU
             dynamic_3 = dynamic_2 + 0.005 * ptr_quant
             dynamic_3 = torch.where(dynamic_3<500,500-dynamic_3,dynamic_3-500)
             dynamic[:, :, :,step+1] = torch.cat([dynamic_1.repeat(1,20).unsqueeze(2),

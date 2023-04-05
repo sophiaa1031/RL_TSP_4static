@@ -16,6 +16,7 @@ from torch.utils.data import Dataset
 import matplotlib
 # matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+from math import log, exp
 
 
 class TSPDataset(Dataset):
@@ -51,47 +52,34 @@ def update_mask(mask, dynamic, chosen_idx):
     return mask
 
 
-def reward(static, tour_indices, w1=1, w2=0):
+def reward(static, dynamic, action, w1=1, w2=0):
     """
     Parameters
     ----------
     static: torch.FloatTensor containing static (e.g. x, y) data
-    tour_indices: torch.IntTensor of size (batch_size, num_cities)
+    action: torch.IntTensor of size (batch_size, num_cities)
 
     Returns
     -------
     Euclidean distance between consecutive nodes on the route. of size
     (batch_size, num_cities)
     """
+    obj1 = obj1+action[0]/(2^action[1]-1)^2
+    dis = dynamic[2]
+    snr = action[2]*log((1+0.01*static[1]*dis^(-2)),2)
+    obj2 = obj2+torch.max(action[0]*0.005*action[1]/static[1] + action[0]*0.01*action[1]/snr.squeeze(),dim=1)
 
-    # Convert the indices back into a tour
-    idx = tour_indices.unsqueeze(1).expand_as(static)
-    tour = torch.gather(static.data, 2, idx).permute(0, 2, 1)
-
-    # Make a full tour by returning to the start
-    y = torch.cat((tour, tour[:, :1]), dim=1)
-    # first 2 is xy coordinate, third column is another obj
-    y_dis = y[:, :, :2]
-    y_dis2 = y[:, :, 2:]
-
-    # Euclidean distance between each consecutive point
-    tour_len = torch.sqrt(torch.sum(torch.pow(y_dis[:, :-1] - y_dis[:, 1:], 2), dim=2))
-    obj1 = tour_len.sum(1).detach()
-
-    tour_len2 = torch.sqrt(torch.sum(torch.pow(y_dis2[:, :-1] - y_dis2[:, 1:], 2), dim=2))
-    obj2 = tour_len2.sum(1).detach()
-
-    obj = w1*obj1 + w2*obj2
+    obj = w1*obj1 + w2*obj2 - 0.01*sum(action[2]-1)
     return obj, obj1, obj2
 
 
 
-def render(static, tour_indices, save_path):
+def render(static, action, save_path):
     """Plots the found tours."""
 
     plt.close('all')
 
-    num_plots = 3 if int(np.sqrt(len(tour_indices))) >= 3 else 1
+    num_plots = 3 if int(np.sqrt(len(action))) >= 3 else 1
 
     _, axes = plt.subplots(nrows=num_plots, ncols=num_plots,
                            sharex='col', sharey='row')
@@ -103,7 +91,7 @@ def render(static, tour_indices, save_path):
     for i, ax in enumerate(axes):
 
         # Convert the indices back into a tour
-        idx = tour_indices[i]
+        idx = action[i]
         if len(idx.size()) == 1:
             idx = idx.unsqueeze(0)
 
