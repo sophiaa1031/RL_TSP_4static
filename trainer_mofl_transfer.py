@@ -250,7 +250,8 @@ def train_tsp(args, w1=1, w2=0, checkpoint = None):
                     flvn.update_mask,
                     args.num_layers,
                     args.dropout,
-                    args.iteration).to(device)
+                    args.iteration,
+                    args.num_cars).to(device)
 
     critic = StateCritic(STATIC_SIZE, DYNAMIC_SIZE, args.hidden_size).to(device)
 
