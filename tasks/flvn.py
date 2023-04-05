@@ -32,7 +32,7 @@ class TSPDataset(Dataset):
         f = 1*torch.rand((loop, num_cars, 1, iteration)) + 2  #f [2,3]
         v = 20 * torch.rand((loop, num_cars, 1, iteration)) + 60  # v [60, 80]
         self.dataset = torch.cat([p, f, v], 2) #（samples, cars number, (q,f,v)  iteration）
-        self.dynamic = torch.zeros(loop, num_cars, 3, iteration)  #（samples, (q,a,b,prob,time), cars number）
+        self.dynamic = torch.zeros(loop, num_cars, 3, iteration)  #（samples, (latency, travel distance, distance), cars number）
         self.num_cars = num_cars
         self.size = loop
 
