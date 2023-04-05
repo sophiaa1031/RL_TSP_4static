@@ -46,7 +46,7 @@ class StateCritic(nn.Module):
                 nn.init.xavier_uniform_(p)
 
     def forward(self, static, dynamic):
-
+        batch_size, input_size, sequence_size = static.size()
         # Use the probabilities of visiting each
         static_hidden = self.static_encoder(static.view(batch_size,-1))
         dynamic_hidden = self.dynamic_encoder(dynamic.view(batch_size,-1))
@@ -97,7 +97,7 @@ def validate(data_loader, actor, reward_fn, w1, w2, render_fn=None, save_dir='.'
     return np.mean(rewards), np.mean(obj1s), np.mean(obj2s)
 
 
-def train(actor, critic, w1, w2, task, num_nodes, train_data, valid_data, reward_fn,
+def train(actor, critic, w1, w2, task, num_cars, train_data, valid_data, reward_fn,
           render_fn, batch_size, actor_lr, critic_lr, max_grad_norm,
           **kwargs):
     """Constructs the main actor & critic networks, and performs all training."""
@@ -105,7 +105,7 @@ def train(actor, critic, w1, w2, task, num_nodes, train_data, valid_data, reward
     now = '%s' % datetime.datetime.now().time()
     now = now.replace(':', '_')
     bname = "_transfer"
-    save_dir = os.path.join(task+bname, '%d' % num_nodes, 'w_%2.2f_%2.2f' % (w1, w2), now)
+    save_dir = os.path.join(task+bname, '%d' % num_cars, 'w_%2.2f_%2.2f' % (w1, w2), now)
 
     checkpoint_dir = os.path.join(save_dir, 'checkpoints')
     if not os.path.exists(checkpoint_dir):
@@ -211,7 +211,7 @@ def train(actor, critic, w1, w2, task, num_nodes, train_data, valid_data, reward
             # save_path = os.path.join(save_dir, 'critic.pt')
             # torch.save(critic.state_dict(), save_path)
             # 存在w_1_0主文件夹下，多存一份，用来transfer to next w
-            main_dir = os.path.join(task+bname, '%d' % num_nodes, 'w_%2.2f_%2.2f' % (w1, w2))
+            main_dir = os.path.join(task+bname, '%d' % num_cars, 'w_%2.2f_%2.2f' % (w1, w2))
             save_path = os.path.join(main_dir, 'actor.pt')
             torch.save(actor.state_dict(), save_path)
             save_path = os.path.join(main_dir, 'critic.pt')
@@ -235,11 +235,11 @@ def train_tsp(args, w1=1, w2=0, checkpoint = None):
     from tasks import motsp
     from tasks.mofl import TSPDataset
 
-    STATIC_SIZE = 2*args.num_nodes # (x, y)
-    DYNAMIC_SIZE = 5*args.num_nodes # dummy for compatibility
+    STATIC_SIZE = args.static_size # (x, y)
+    DYNAMIC_SIZE = args.dynamic_size # dummy for compatibility
 
-    train_data = TSPDataset(args.num_nodes, args.train_size, args.seed)
-    valid_data = TSPDataset(args.num_nodes, args.valid_size, args.seed + 1)
+    train_data = TSPDataset(args.num_cars, args.train_size, args.iteration, args.seed)
+    valid_data = TSPDataset(args.num_cars, args.valid_size, args.iteration, args.seed + 1)
 
     update_fn = None
 
@@ -249,7 +249,8 @@ def train_tsp(args, w1=1, w2=0, checkpoint = None):
                     update_fn,
                     motsp.update_mask,
                     args.num_layers,
-                    args.dropout).to(device)
+                    args.dropout,
+                    args.iteration).to(device)
 
     critic = StateCritic(STATIC_SIZE, DYNAMIC_SIZE, args.hidden_size).to(device)
 
@@ -269,7 +270,7 @@ def train_tsp(args, w1=1, w2=0, checkpoint = None):
     if not args.test:
         train(actor, critic, w1, w2, **kwargs)
 
-    test_data = TSPDataset(args.num_nodes, args.valid_size, args.seed + 2)
+    test_data = TSPDataset(args.num_cars, args.valid_size, args.seed + 2)
 
     test_dir = 'test'
     test_loader = DataLoader(test_data, args.valid_size, False, num_workers=0)
@@ -295,16 +296,16 @@ def train_tsp(args, w1=1, w2=0, checkpoint = None):
 #     STATIC_SIZE = 2 # (x, y)
 #     DYNAMIC_SIZE = 2 # (load, demand)
 #
-#     max_load = LOAD_DICT[args.num_nodes]
+#     max_load = LOAD_DICT[args.num_cars]
 #
 #     train_data = VehicleRoutingDataset(args.train_size,
-#                                        args.num_nodes,
+#                                        args.num_cars,
 #                                        max_load,
 #                                        MAX_DEMAND,
 #                                        args.seed)
 #
 #     valid_data = VehicleRoutingDataset(args.valid_size,
-#                                        args.num_nodes,
+#                                        args.num_cars,
 #                                        max_load,
 #                                        MAX_DEMAND,
 #                                        args.seed + 1)
@@ -336,7 +337,7 @@ def train_tsp(args, w1=1, w2=0, checkpoint = None):
 #         train(actor, critic, **kwargs)
 #
 #     test_data = VehicleRoutingDataset(args.valid_size,
-#                                       args.num_nodes,
+#                                       args.num_cars,
 #                                       max_load,
 #                                       MAX_DEMAND,
 #                                       args.seed + 2)
@@ -349,13 +350,13 @@ def train_tsp(args, w1=1, w2=0, checkpoint = None):
 
 
 if __name__ == '__main__':
-    num_nodes = 20
+    num_cars = 20
     parser = argparse.ArgumentParser(description='Combinatorial Optimization')
     parser.add_argument('--seed', default=12345, type=int)
     # parser.add_argument('--checkpoint', default="tsp/20/w_1_0/20_06_30.888074")
     parser.add_argument('--test', action='store_true', default=False)
     parser.add_argument('--task', default='tsp')
-    parser.add_argument('--nodes', dest='num_nodes', default=num_nodes, type=int)
+    parser.add_argument('--nodes', dest='num_cars', default=num_cars, type=int)
     parser.add_argument('--actor_lr', default=5e-4, type=float)
     parser.add_argument('--critic_lr', default=5e-4, type=float)
     parser.add_argument('--max_grad_norm', default=2., type=float)
@@ -365,6 +366,9 @@ if __name__ == '__main__':
     parser.add_argument('--layers', dest='num_layers', default=1, type=int)
     parser.add_argument('--train-size',default=1000, type=int)
     parser.add_argument('--valid-size', default=1000, type=int)
+    parser.add_argument('---iteration', default=10, type=int)
+    parser.add_argument('---static_size', default=3, type=int)
+    parser.add_argument('---dynamic_size', default=3, type=int)
 
     args = parser.parse_args()
 
@@ -381,7 +385,7 @@ if __name__ == '__main__':
                 train_tsp(args, 1, 0, None)
             else:
                 # Parameter transfer. train based on the parameters of the previous subproblem
-                checkpoint = 'tsp_transfer/%d/w_%2.2f_%2.2f'%(num_nodes, 1-w2_list[i-1], w2_list[i-1])
+                checkpoint = 'tsp_transfer/%d/w_%2.2f_%2.2f'%(num_cars, 1-w2_list[i-1], w2_list[i-1])
                 train_tsp(args, 1-w2_list[i], w2_list[i], checkpoint)
 
 
