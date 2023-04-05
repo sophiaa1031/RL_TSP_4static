@@ -18,7 +18,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader
 
-from model_fl import DRL4TSP
+from model_fl import Actor
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 # device = torch.device('cpu')
@@ -232,8 +232,8 @@ def train_tsp(args, w1=1, w2=0, checkpoint = None):
     # TSP50, 6.08
     # TSP100, 8.44
 
-    from tasks import motsp
-    from tasks.mofl import TSPDataset
+    from tasks import flvn
+    from tasks.flvn import TSPDataset
 
     STATIC_SIZE = args.static_size # (x, y)
     DYNAMIC_SIZE = args.dynamic_size # dummy for compatibility
@@ -243,11 +243,11 @@ def train_tsp(args, w1=1, w2=0, checkpoint = None):
 
     update_fn = None
 
-    actor = DRL4TSP(STATIC_SIZE,
+    actor = Actor(STATIC_SIZE,
                     DYNAMIC_SIZE,
                     args.hidden_size,
                     update_fn,
-                    motsp.update_mask,
+                    flvn.update_mask,
                     args.num_layers,
                     args.dropout,
                     args.iteration).to(device)
@@ -257,8 +257,8 @@ def train_tsp(args, w1=1, w2=0, checkpoint = None):
     kwargs = vars(args)
     kwargs['train_data'] = train_data
     kwargs['valid_data'] = valid_data
-    kwargs['reward_fn'] = motsp.reward
-    kwargs['render_fn'] = motsp.render
+    kwargs['reward_fn'] = flvn.reward
+    kwargs['render_fn'] = flvn.render
 
     if checkpoint:
         path = os.path.join(checkpoint, 'actor.pt')
@@ -274,79 +274,11 @@ def train_tsp(args, w1=1, w2=0, checkpoint = None):
 
     test_dir = 'test'
     test_loader = DataLoader(test_data, args.valid_size, False, num_workers=0)
-    out = validate(test_loader, actor, motsp.reward, w1, w2, motsp.render, test_dir, num_plot=5)
+    out = validate(test_loader, actor, flvn.reward, w1, w2, flvn.render, test_dir, num_plot=5)
 
     print('w1=%2.2f,w2=%2.2f. Average tour length: ' % (w1, w2), out)
 
 
-# def train_vrp(args):
-#
-#     # Goals from paper:
-#     # VRP10, Capacity 20:  4.84  (Greedy)
-#     # VRP20, Capacity 30:  6.59  (Greedy)
-#     # VRP50, Capacity 40:  11.39 (Greedy)
-#     # VRP100, Capacity 50: 17.23  (Greedy)
-#
-#     from tasks import vrp
-#     from tasks.vrp import VehicleRoutingDataset
-#
-#     # Determines the maximum amount of load for a vehicle based on num nodes
-#     LOAD_DICT = {10: 20, 20: 30, 50: 40, 100: 50}
-#     MAX_DEMAND = 9
-#     STATIC_SIZE = 2 # (x, y)
-#     DYNAMIC_SIZE = 2 # (load, demand)
-#
-#     max_load = LOAD_DICT[args.num_cars]
-#
-#     train_data = VehicleRoutingDataset(args.train_size,
-#                                        args.num_cars,
-#                                        max_load,
-#                                        MAX_DEMAND,
-#                                        args.seed)
-#
-#     valid_data = VehicleRoutingDataset(args.valid_size,
-#                                        args.num_cars,
-#                                        max_load,
-#                                        MAX_DEMAND,
-#                                        args.seed + 1)
-#
-#     actor = DRL4TSP(STATIC_SIZE,
-#                     DYNAMIC_SIZE,
-#                     args.hidden_size,
-#                     train_data.update_dynamic,
-#                     train_data.update_mask,
-#                     args.num_layers,
-#                     args.dropout).to(device)
-#
-#     critic = StateCritic(STATIC_SIZE, DYNAMIC_SIZE, args.hidden_size).to(device)
-#
-#     kwargs = vars(args)
-#     kwargs['train_data'] = train_data
-#     kwargs['valid_data'] = valid_data
-#     kwargs['reward_fn'] = vrp.reward
-#     kwargs['render_fn'] = vrp.render
-#
-#     if args.checkpoint:
-#         path = os.path.join(args.checkpoint, 'actor.pt')
-#         actor.load_state_dict(torch.load(path, device))
-#
-#         path = os.path.join(args.checkpoint, 'critic.pt')
-#         critic.load_state_dict(torch.load(path, device))
-#
-#     if not args.test:
-#         train(actor, critic, **kwargs)
-#
-#     test_data = VehicleRoutingDataset(args.valid_size,
-#                                       args.num_cars,
-#                                       max_load,
-#                                       MAX_DEMAND,
-#                                       args.seed + 2)
-#
-#     test_dir = 'test'
-#     test_loader = DataLoader(test_data, args.batch_size, False, num_workers=0)
-#     out = validate(test_loader, actor, vrp.reward, vrp.render, test_dir, num_plot=5)
-#
-#     print('Average tour length: ', out)
 
 
 if __name__ == '__main__':

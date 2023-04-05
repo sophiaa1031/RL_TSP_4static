@@ -5,10 +5,10 @@ import torch.nn.functional as F
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 #device = torch.device('cpu')
 
-class DRL4TSP(nn.Module):
+class Actor(nn.Module):
     def __init__(self, static_size, dynamic_size, hidden_size,
                  update_fn=None, mask_fn=None, num_layers=1, dropout=0.,iteration=10):
-        super(DRL4TSP, self).__init__()
+        super(Actor, self).__init__()
         self.update_fn = update_fn
         self.mask_fn = update_fn
         # Define the encoder & decoder models
