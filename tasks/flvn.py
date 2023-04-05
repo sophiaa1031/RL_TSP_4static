@@ -33,7 +33,9 @@ class TSPDataset(Dataset):
         f = 1*torch.rand((loop, num_cars, 1, iteration)) + 2  #f [2,3]
         v = 20 * torch.rand((loop, num_cars, 1, iteration)) + 60  # v [60, 80]
         self.dataset = torch.cat([p, f, v], 2) #（samples, cars number, (q,f,v)  iteration）
-        self.dynamic = torch.zeros(loop, num_cars, 3, iteration)  #（samples, (latency, travel distance, distance), cars number）
+        latency_travel_dis = torch.zeros(loop, num_cars, 2, iteration)
+        distance = torch.ones(loop, num_cars, 1, iteration)*500
+        self.dynamic = torch.cat([latency_travel_dis, distance], 2)  #（samples, (latency, travel distance, distance), cars number）
         self.num_cars = num_cars
         self.size = loop
 
@@ -64,12 +66,35 @@ def reward(static, dynamic, action, w1=1, w2=0):
     Euclidean distance between consecutive nodes on the route. of size
     (batch_size, num_cities)
     """
-    obj1 = obj1+action[0]/(2^action[1]-1)^2
-    dis = dynamic[2]
-    snr = action[2]*log((1+0.01*static[1]*dis^(-2)),2)
-    obj2 = obj2+torch.max(action[0]*0.005*action[1]/static[1] + action[0]*0.01*action[1]/snr.squeeze(),dim=1)
+    #static  [batch_size,num_cars,features,iteration]
+    # dynamic  [batch_size,num_cars,features,iteration]
+    # action  [batch_size,num_cars,action,iteration-1]
+    batch_size, num_cars, _, iteration = static.shape
+    obj1 = torch.zeros([batch_size,iteration-1]) #
+    obj2 = torch.zeros([batch_size, iteration - 1]) #
+    obj = torch.zeros([batch_size, iteration - 1])
+    for iter in range(iteration - 1):
+        dis = dynamic[:, :, 2, iter]
+        snr = action[:, :, 2, iter] * torch.log2(1 + 0.01 * torch.multiply(static[:, :, 1, iter], torch.pow(dis, -2)))
+        if iter == 0:
+            obj1[:, iter] =torch.sum(torch.div(action[:, :, 0, iter],
+                                               (2 ^ action[:, :, 1, iter] - 1) ^ 2), 1)
+            obj2_temp = torch.div(torch.multiply(action[:, :, 0, iter]*0.005,action[:, :, 1, iter]),static[:, :, 1, iter]) + \
+                torch.div(torch.multiply(action[:, :, 0, iter]*0.01, action[:, :, 1, iter]),snr)
+            obj2[:, iter],idx = torch.max(obj2_temp,dim=1)
 
-    obj = w1*obj1 + w2*obj2 - 0.01*sum(action[2]-1)
+        else:
+            obj1[:, iter] = obj1[:, iter-1] + torch.sum(torch.div(action[:, :, 0, iter], (2 ^ action[:, :, 1, iter] - 1) ^ 2), 1)
+            obj2_temp = torch.div(torch.multiply(action[:, :, 0, iter] * 0.005, action[:, :, 1, iter]),
+                                  static[:, :, 1, iter]) + \
+                        torch.div(torch.multiply(action[:, :, 0, iter] * 0.01, action[:, :, 1, iter]), snr)
+            obj2[:, iter], idx = torch.max(obj2_temp, dim=1)
+            obj2[:, iter] = obj2[:, iter] + obj2[:, iter - 1]
+    #     obj1[batch_size,iter] = obj1+torch.sum(action[:,:,0,:]/(2^action[:,:,1,:]-1)^2
+
+        #obj2 = obj2+torch.max(action[0]*0.005*action[1]/static[1] + action[0]*0.01*action[1]/snr.squeeze(),dim=1)
+
+        obj[:,iter] = w1*obj1[:, iter] + w2*obj2[:, iter] - 0.01*torch.sum(action[:, :, 2, iter]-1,dim=1)
     return obj, obj1, obj2
 
 

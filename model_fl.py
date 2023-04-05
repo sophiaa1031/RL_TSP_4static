@@ -7,13 +7,14 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 class Actor(nn.Module):
     def __init__(self, static_size, dynamic_size, hidden_size,
-                 update_fn=None, mask_fn=None, num_layers=1, dropout=0.,iteration=10):
+                 update_fn=None, mask_fn=None, num_layers=1, dropout=0.,iteration=10,num_cars=10):
         super(Actor, self).__init__()
         self.update_fn = update_fn
         self.mask_fn = update_fn
         # Define the encoder & decoder models
         self.static_encoder = nn.Linear(static_size, hidden_size)
         self.dynamic_encoder = nn.Linear(dynamic_size, hidden_size)
+        #self.bn = torch.nn.BatchNorm1d(num_cars, eps=1e-05)
         self.actor1_select = nn.Linear(hidden_size*2, 2)
         self.actor2_quant = nn.Linear(hidden_size*2, 32)
         self.actor3_b = nn.Linear(hidden_size*2, 1)
@@ -40,6 +41,7 @@ class Actor(nn.Module):
             static_hidden = self.static_encoder(static[:,:,:,step])#[]
             dynamic_hidden = self.dynamic_encoder(dynamic[:,:,:,step])
             state = torch.cat((static_hidden, dynamic_hidden), 2)#[batch_size,num_cars,2*hidden_size]
+
             whether_select = self.actor1_select(state) # (batch_size,num_cars,2)
             quant_select = self.actor2_quant(state) #(batch_size,num_cars,32)
             b = torch.sigmoid(self.actor3_b(state)) #(batch_size,num_cars,1)
@@ -60,7 +62,7 @@ class Actor(nn.Module):
                 prob_select, ptr_select = torch.max(whether_select_probs, 1)  # Greedy
                 logp_select = prob_select.log()
 
-
+            ptr_quant = ptr_quant + 1
             # save the maximum latency in the last iteration
             dynamic_1,_ = torch.max(0.005*ptr_quant + 0.01*ptr_quant/b.squeeze(),dim=1)#(batch_size)
             dynamic_1 = dynamic_1.unsqueeze(1)#(batch_size,1)
@@ -88,7 +90,7 @@ class Actor(nn.Module):
             #     mask = self.mask_fn(mask, dynamic, ptr.data).detach()
 
             whether_select_lst.append(ptr_select.unsqueeze(2))
-            quant_select_lst.append(ptr_select.unsqueeze(2))
+            quant_select_lst.append(ptr_quant.unsqueeze(2))
             zero = torch.tensor(0)
             one = torch.tensor(1)
             b_lst.append(torch.where (b > 0.5, one, zero))
