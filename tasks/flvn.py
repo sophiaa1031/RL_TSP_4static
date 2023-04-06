@@ -29,13 +29,16 @@ class TSPDataset(Dataset):
 
         np.random.seed(seed)
         torch.manual_seed(seed)
-        p = 0.09*torch.rand((loop, num_cars, 1, iteration)) + 0.01  #p [0.01,0.1]
-        f = 1*torch.rand((loop, num_cars, 1, iteration)) + 2  #f [2,3]
-        v = 20 * torch.rand((loop, num_cars, 1, iteration)) + 60  # v [60, 80]
-        self.dataset = torch.cat([p, f, v], 2) #（samples, cars number, (q,f,v)  iteration）
-        latency_travel_dis = torch.zeros(loop, num_cars, 2, iteration)
-        distance = torch.ones(loop, num_cars, 1, iteration)*500
-        self.dynamic = torch.cat([latency_travel_dis, distance], 2)  #（samples, (latency, travel distance, distance), cars number）
+        pwr = torch.ones((loop, num_cars, 1, iteration)) * 0.1  # 0.09*torch.rand((loop, num_cars, 1, iteration)) + 0.01  #p [0.01,0.1]
+        fre = 1*torch.rand((loop, num_cars, 1, iteration)) + 2  #f [2,3]
+        vel = 20 * torch.rand((loop, num_cars, 1, iteration)) + 60  # v [60, 80]
+        rho = torch.rand((loop, num_cars, 1, iteration))
+        rho = rho / torch.sum(rho)
+        self.static = torch.cat([pwr, fre, vel, rho], 2) #（samples, cars number, (q,f,v)  iteration）
+        latency_itr = torch.zeros(loop, num_cars, 1, iteration)
+        travel_dis = torch.zeros(loop, num_cars, 1, iteration)
+        rsu_dis = torch.ones(loop, num_cars, 1, iteration)*500
+        self.dynamic = torch.cat([latency_itr, travel_dis, rsu_dis], 2)  #（samples, (latency, travel distance, distance), cars number）
         self.num_cars = num_cars
         self.size = loop
 
@@ -45,7 +48,7 @@ class TSPDataset(Dataset):
 
     def __getitem__(self, idx):
         # (static, dynamic, start_loc)
-        return (self.dataset[idx], self.dynamic[idx], [])
+        return (self.static[idx], self.dynamic[idx], [])
 
 
 def update_mask(mask, dynamic, chosen_idx):

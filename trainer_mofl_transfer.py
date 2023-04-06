@@ -21,6 +21,8 @@ from torch.utils.data import DataLoader
 from model_fl import Actor
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+
 # device = torch.device('cpu')
 
 
@@ -38,18 +40,19 @@ class StateCritic(nn.Module):
         self.dynamic_encoder = nn.Linear(dynamic_size, hidden_size)
 
         # Define the encoder & decoder models
-        self.fc1 = nn.Linear(hidden_size*2, 32)
+        self.fc1 = nn.Linear(hidden_size * 2, 32)
         self.fc2 = nn.Linear(32, 1)
 
         for p in self.parameters():
             if len(p.shape) > 1:
                 nn.init.xavier_uniform_(p)
+        print('init over')
 
     def forward(self, static, dynamic):
         batch_size, input_size, sequence_size = static.size()
         # Use the probabilities of visiting each
-        static_hidden = self.static_encoder(static.view(batch_size,-1))
-        dynamic_hidden = self.dynamic_encoder(dynamic.view(batch_size,-1))
+        static_hidden = self.static_encoder(static.view(batch_size, -1))
+        dynamic_hidden = self.dynamic_encoder(dynamic.view(batch_size, -1))
 
         hidden = torch.cat((static_hidden, dynamic_hidden), 1)
 
@@ -73,7 +76,6 @@ def validate(data_loader, actor, reward_fn, w1, w2, render_fn=None, save_dir='.'
     obj1s = []
     obj2s = []
     for batch_idx, batch in enumerate(data_loader):
-
         static, dynamic, x0 = batch
 
         static = static.to(device)
@@ -105,11 +107,11 @@ def train(actor, critic, w1, w2, task, num_cars, train_data, valid_data, reward_
     now = '%s' % datetime.datetime.now().time()
     now = now.replace(':', '_')
     bname = "_transfer"
-    save_dir = os.path.join(task+bname, '%d' % num_cars, 'w_%2.2f_%2.2f' % (w1, w2), now)
+    save_dir = os.path.join(task + bname, '%d' % num_cars, 'w_%2.2f_%2.2f' % (w1, w2), now)
 
     checkpoint_dir = os.path.join(save_dir, 'checkpoints')
     if not os.path.exists(checkpoint_dir):
-         os.makedirs(checkpoint_dir)
+        os.makedirs(checkpoint_dir)
 
     actor_optim = optim.Adam(actor.parameters(), lr=actor_lr)
     critic_optim = optim.Adam(critic.parameters(), lr=critic_lr)
@@ -121,8 +123,8 @@ def train(actor, critic, w1, w2, task, num_cars, train_data, valid_data, reward_
     best_reward = np.inf
     start_total = time.time()
     for epoch in range(3):
-        print("epoch %d start:"% epoch)
-        actor.train()  #   model train -> dropout   training ->dropout 随机丢弃掉一些神经元0.3    testing  dropout 值*0.3
+        print("epoch %d start:" % epoch)
+        actor.train()  # model train -> dropout   training ->dropout 随机丢弃掉一些神经元0.3    testing  dropout 值*0.3
         critic.train()
 
         times, losses, rewards, critic_rewards = [], [], [], []
@@ -139,34 +141,39 @@ def train(actor, critic, w1, w2, task, num_cars, train_data, valid_data, reward_
             dynamic = dynamic.to(device)
             x0 = x0.to(device) if len(x0) > 0 else None
 
-            # Full forward pass through the dataset
-            action, action_logp = actor(static, dynamic)   #  actor.forward(static, dynamic, x0)
+            # Actor选择动作
+            action, action_logp = actor(static, dynamic)  # actor.forward(static, dynamic, x0)
 
-            # Sum the log probabilities for each city in the tour
+            # 执行动作,计算奖励
             reward, obj1, obj2 = reward_fn(static, dynamic, action, w1, w2)
 
-            # Query the critic for an estimate of the reward
+            # Critic评估状态价值
             critic_est = critic(static, dynamic).view(-1)
 
+            # 计算优势函数
             advantage = (reward - critic_est)
-            actor_loss = torch.mean(advantage.detach() * tour_logp.sum(dim=1))
-            critic_loss = torch.mean(advantage ** 2)
 
+            # Actor参数更新
+            actor_loss = torch.mean(advantage.detach() * action_logp.sum(dim=1))
             actor_optim.zero_grad()
             actor_loss.backward()
             torch.nn.utils.clip_grad_norm_(actor.parameters(), max_grad_norm)
             actor_optim.step()
 
+            # Critic参数更新
+            critic_loss = torch.mean(advantage ** 2)
             critic_optim.zero_grad()
             critic_loss.backward()
             torch.nn.utils.clip_grad_norm_(critic.parameters(), max_grad_norm)
             critic_optim.step()
 
+            # 存入relay buffer
             critic_rewards.append(torch.mean(critic_est.detach()).item())
             rewards.append(torch.mean(reward.detach()).item())
             losses.append(torch.mean(actor_loss.detach()).item())
             obj1s.append(torch.mean(obj1.detach()).item())
             obj2s.append(torch.mean(obj2.detach()).item())
+
             if (batch_idx + 1) % 200 == 0:
                 print("\n")
                 end = time.time()
@@ -198,11 +205,10 @@ def train(actor, critic, w1, w2, task, num_cars, train_data, valid_data, reward_
         # Save rendering of validation set tours
         # valid_dir = os.path.join(save_dir, '%s' % epoch)
         mean_valid, mean_obj1_valid, mean_obj2_valid = validate(valid_loader, actor, reward_fn, w1, w2, render_fn,
-                              '.', num_plot=5)
+                                                                '.', num_plot=5)
 
         # Save best model parameters
         if mean_valid < best_reward:
-
             best_reward = mean_valid
 
             # save_path = os.path.join(save_dir, 'actor.pt')
@@ -211,22 +217,20 @@ def train(actor, critic, w1, w2, task, num_cars, train_data, valid_data, reward_
             # save_path = os.path.join(save_dir, 'critic.pt')
             # torch.save(critic.state_dict(), save_path)
             # 存在w_1_0主文件夹下，多存一份，用来transfer to next w
-            main_dir = os.path.join(task+bname, '%d' % num_cars, 'w_%2.2f_%2.2f' % (w1, w2))
+            main_dir = os.path.join(task + bname, '%d' % num_cars, 'w_%2.2f_%2.2f' % (w1, w2))
             save_path = os.path.join(main_dir, 'actor.pt')
             torch.save(actor.state_dict(), save_path)
             save_path = os.path.join(main_dir, 'critic.pt')
             torch.save(critic.state_dict(), save_path)
 
-        print('Mean epoch loss/reward: %2.4f, %2.4f, %2.4f, obj1_valid: %2.3f, obj2_valid: %2.3f. took: %2.4fs '\
+        print('Mean epoch loss/reward: %2.4f, %2.4f, %2.4f, obj1_valid: %2.3f, obj2_valid: %2.3f. took: %2.4fs ' \
               '(%2.4fs / 100 batches)\n' % \
               (mean_loss, mean_reward, mean_valid, mean_obj1_valid, mean_obj2_valid, time.time() - epoch_start,
-              np.mean(times)))
+               np.mean(times)))
     print("Total run time of epoches: %2.4f" % (time.time() - start_total))
 
 
-
-def train_tsp(args, w1=1, w2=0, checkpoint = None):
-
+def train_tsp(args, w1=1, w2=0, checkpoint=None):
     # Goals from paper:
     # TSP20, 3.97
     # TSP50, 6.08
@@ -235,25 +239,23 @@ def train_tsp(args, w1=1, w2=0, checkpoint = None):
     from tasks import flvn
     from tasks.flvn import TSPDataset
 
-    STATIC_SIZE = args.static_size # (x, y)
-    DYNAMIC_SIZE = args.dynamic_size # dummy for compatibility
-
     train_data = TSPDataset(args.num_cars, args.train_size, args.iteration, args.seed)
     valid_data = TSPDataset(args.num_cars, args.valid_size, args.iteration, args.seed + 1)
+    test_data = TSPDataset(args.num_cars, args.valid_size, args.iteration, args.seed + 2)
 
     update_fn = None
 
-    actor = Actor(STATIC_SIZE,
-                    DYNAMIC_SIZE,
-                    args.hidden_size,
-                    update_fn,
-                    flvn.update_mask,
-                    args.num_layers,
-                    args.dropout,
-                    args.iteration,
-                    args.num_cars).to(device)
+    actor = Actor(args.static_size,
+                  args.dynamic_size,
+                  args.hidden_size,
+                  update_fn,
+                  flvn.update_mask,
+                  args.num_layers,
+                  args.dropout,
+                  args.iteration,
+                  args.num_cars).to(device)
 
-    critic = StateCritic(STATIC_SIZE, DYNAMIC_SIZE, args.hidden_size).to(device)
+    critic = StateCritic(args.static_size, args.dynamic_size, args.hidden_size).to(device)
 
     kwargs = vars(args)
     kwargs['train_data'] = train_data
@@ -271,15 +273,11 @@ def train_tsp(args, w1=1, w2=0, checkpoint = None):
     if not args.test:
         train(actor, critic, w1, w2, **kwargs)
 
-    test_data = TSPDataset(args.num_cars, args.valid_size, args.seed + 2)
-
     test_dir = 'test'
     test_loader = DataLoader(test_data, args.valid_size, False, num_workers=0)
     out = validate(test_loader, actor, flvn.reward, w1, w2, flvn.render, test_dir, num_plot=5)
 
     print('w1=%2.2f,w2=%2.2f. Average tour length: ' % (w1, w2), out)
-
-
 
 
 if __name__ == '__main__':
@@ -297,28 +295,25 @@ if __name__ == '__main__':
     parser.add_argument('--hidden', dest='hidden_size', default=128, type=int)
     parser.add_argument('--dropout', default=0.1, type=float)
     parser.add_argument('--layers', dest='num_layers', default=1, type=int)
-    parser.add_argument('--train-size',default=1000, type=int)
+    parser.add_argument('--train-size', default=1000, type=int)
     parser.add_argument('--valid-size', default=1000, type=int)
     parser.add_argument('---iteration', default=10, type=int)
-    parser.add_argument('---static_size', default=3, type=int)
+    parser.add_argument('---static_size', default=4, type=int)
     parser.add_argument('---dynamic_size', default=3, type=int)
+    parser.add_argument('---subproblem_size', default=5, type=int)
 
     args = parser.parse_args()
 
-
-    T = 5
     if args.task == 'tsp':
-        w2_list = np.arange(T+1)/T
-        for i in range(0,T+1):
-            print("Current w:%2.2f/%2.2f"% (1-w2_list[i], w2_list[i]))
-            if i==0:
+        w2_list = np.arange(args.subproblem_size + 1) / args.subproblem_size
+        for i in range(0, args.subproblem_size + 1):
+            print("Current w:%2.2f/%2.2f" % (1 - w2_list[i], w2_list[i]))
+            if i == 0:
                 # The first subproblem can be trained from scratch. It also can be trained based on a
                 # single-TSP trained model, where the model can be obtained from everywhere in github
                 checkpoint = 'tsp_transfer_100run_500000_5epoch_40city/40/w_1.00_0.00'
                 train_tsp(args, 1, 0, None)
             else:
                 # Parameter transfer. train based on the parameters of the previous subproblem
-                checkpoint = 'tsp_transfer/%d/w_%2.2f_%2.2f'%(num_cars, 1-w2_list[i-1], w2_list[i-1])
-                train_tsp(args, 1-w2_list[i], w2_list[i], checkpoint)
-
-
+                checkpoint = 'tsp_transfer/%d/w_%2.2f_%2.2f' % (num_cars, 1 - w2_list[i - 1], w2_list[i - 1])
+                train_tsp(args, 1 - w2_list[i], w2_list[i], checkpoint)
