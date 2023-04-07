@@ -27,6 +27,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
 class StateCritic(nn.Module):
+    # 根据输入的状态输出状态的价值
     """Estimates the problem complexity.
 
     This is a basic module that just looks at the log-probabilities predicted by
@@ -127,7 +128,7 @@ def train(actor, critic, w1, w2, task, num_cars, train_data, valid_data, reward_
         actor.train()  # model train -> dropout   training ->dropout 随机丢弃掉一些神经元0.3    testing  dropout 值*0.3
         critic.train()
 
-        times, losses, rewards, critic_rewards = [], [], [], []
+        times, losses, rewards, critic_rewards = [], [], [], []  # 缓存中的奖励
         obj1s, obj2s = [], []
 
         epoch_start = time.time()
@@ -141,7 +142,7 @@ def train(actor, critic, w1, w2, task, num_cars, train_data, valid_data, reward_
             dynamic = dynamic.to(device)
             x0 = x0.to(device) if len(x0) > 0 else None
 
-            # Actor选择动作
+            # 根据当前状态(state)从Actor中输出动作的概率分布
             action, action_logp = actor(static, dynamic)  # actor.forward(static, dynamic, x0)
 
             # 执行动作,计算奖励
@@ -154,14 +155,14 @@ def train(actor, critic, w1, w2, task, num_cars, train_data, valid_data, reward_
             advantage = (reward - critic_est)
 
             # Actor参数更新
-            actor_loss = torch.mean(advantage.detach() * action_logp.sum(dim=1))
+            actor_loss = torch.mean(advantage.detach() * action_logp.sum(dim=1))  # 计算Actor的损失函数
             actor_optim.zero_grad()
-            actor_loss.backward()
+            actor_loss.backward()  # 反向传播计算梯度
             torch.nn.utils.clip_grad_norm_(actor.parameters(), max_grad_norm)
-            actor_optim.step()
+            actor_optim.step()  # 更新模型参数
 
             # Critic参数更新
-            critic_loss = torch.mean(advantage ** 2)
+            critic_loss = torch.mean(advantage ** 2)  # 计算Critic的损失函数
             critic_optim.zero_grad()
             critic_loss.backward()
             torch.nn.utils.clip_grad_norm_(critic.parameters(), max_grad_norm)
@@ -253,9 +254,9 @@ def train_tsp(args, w1=1, w2=0, checkpoint=None):
                   args.num_layers,
                   args.dropout,
                   args.iteration,
-                  args.num_cars).to(device)
+                  args.num_cars).to(device)  # 定义一个Actor模型
 
-    critic = StateCritic(args.static_size, args.dynamic_size, args.hidden_size).to(device)
+    critic = StateCritic(args.static_size, args.dynamic_size, args.hidden_size).to(device)  # 定义一个Critic模型
 
     kwargs = vars(args)
     kwargs['train_data'] = train_data

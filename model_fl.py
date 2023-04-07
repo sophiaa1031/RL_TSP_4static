@@ -33,7 +33,6 @@ class Actor(nn.Module):
         # Static elements only need to be processed once, and can be used across
         # all 'pointing' iterations. When / if the dynamic elements change,
         # their representations will need to get calculated again.
-        print("static.shape", static.shape)
 
         whether_select_lst, quant_select_lst, b_lst = [], [], []
         whether_select_logp, quant_select_logp, b_logp = [], [], []
@@ -51,6 +50,7 @@ class Actor(nn.Module):
             quant_probs = F.softmax(quant_select, dim=2)  # (batch_size,num_cars,32)
 
             if self.training:
+                # 根据概率分布选择一个动作
                 quant_cate = torch.distributions.Categorical(quant_probs)
                 select_cate = torch.distributions.Categorical(whether_select_probs)
                 ptr_quant = quant_cate.sample()  # (batch, num_cars)
@@ -90,6 +90,7 @@ class Actor(nn.Module):
             # if self.mask_fn is not None:
             #     mask = self.mask_fn(mask, dynamic, ptr.data).detach()
 
+            # 记录当前动作
             whether_select_lst.append(ptr_select.unsqueeze(2))
             quant_select_lst.append(ptr_quant.unsqueeze(2))
             zero = torch.tensor(0).to(device)
