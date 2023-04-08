@@ -99,7 +99,7 @@ def reward(static, dynamic, action, w1=1, w2=0):
         #obj2 = obj2+torch.max(action[0]*0.005*action[1]/static[1] + action[0]*0.01*action[1]/snr.squeeze(),dim=1)
 
         obj[:,iter] = w1*1e4*obj1[:, iter] + w2*obj2[:, iter] + 0.01*torch.sum(action[:, :, 2, iter]-1,dim=1)
-    return obj.detach(), obj1, obj2
+    return obj.detach(), 1e4*obj1, obj2
 
 
 

@@ -61,7 +61,7 @@ class Actor(nn.Module):
             static_temp = static_temp.view(batch_size, num_cars, features)
             static_hidden = self.static_encoder(static_temp)  # []
 
-            dynamic_temp = dynamic[:, :, :, step]
+            dynamic_temp = dynamic[:, :, :, step].clone()
             batch_size, num_cars, features = dynamic_temp.shape
             dynamic_temp = dynamic_temp.view(batch_size * num_cars, features)  # Reshape to [batch_size*num_cars, features, steps]
             # BatchNorm2d along feature dimension
@@ -86,24 +86,25 @@ class Actor(nn.Module):
                 ptr_select = select_cate.sample()  ##(batch, num_cars)
                 logp_select = select_cate.log_prob(ptr_select)  # (batch, num_cars)
             else:
-                prob_quant, ptr_quant = torch.max(quant_probs, 1)  # Greedy
+                prob_quant, ptr_quant = torch.max(quant_probs, 2)  # Greedy
                 log_quant = prob_quant.log()
-                prob_select, ptr_select = torch.max(whether_select_probs, 1)  # Greedy
+                prob_select, ptr_select = torch.max(whether_select_probs, 2)  # Greedy
                 logp_select = prob_select.log()
 
-            ptr_quant = ptr_quant + 1
-            # # save the maximum latency in the last iteration
-            dynamic_1, _ = torch.max(0.002 * ptr_select.clone() * ptr_quant.clone()/static[:,:,1,step].clone() + ptr_select.clone()*ptr_quant.clone() / (
-                    320*bdw.detach()*torch.log2(1+(1e7*static[:,:,0,step].clone()/(dynamic[:, :, 2, step].clone()*dynamic[:, :, 2, step].clone())))), dim=1)  # (batch_size)
-            dynamic_1 = dynamic_1.unsqueeze(1)  # (batch_size,1)
-            # update the current travel distance
-            dynamic_2 = torch.mul(dynamic_1, static[:, :, 2, step].clone()) + dynamic[:, :, 1, step].clone()
-            # # update the distance from the RSU
-            dynamic_3 = dynamic_2 + 0.005 * ptr_quant
-            dynamic_3 = torch.where(dynamic_3 < 500, 500 - dynamic_3, dynamic_3 - 500)
-            dynamic[:, :, :, step + 1] = torch.cat([dynamic_1.repeat(1, 20).unsqueeze(2),
-                                                    dynamic_2.unsqueeze(2),
-                                                    dynamic_3.unsqueeze(2)], axis=2).clone()
+            with torch.no_grad():
+                ptr_quant = ptr_quant + 1
+                # # save the maximum latency in the last iteration
+                dynamic_1, _ = torch.max(0.002 * ptr_select.clone() * ptr_quant.clone()/static[:,:,1,step].clone() + ptr_select.clone()*ptr_quant.clone() / (
+                        320*bdw.detach()*torch.log2(1+(1e7*static[:,:,0,step].clone()/(dynamic[:, :, 2, step].clone()*dynamic[:, :, 2, step].clone())))), dim=1)  # (batch_size)
+                dynamic_1 = dynamic_1.unsqueeze(1)  # (batch_size,1)
+                # update the current travel distance
+                dynamic_2 = torch.mul(dynamic_1, static[:, :, 2, step].clone()) + dynamic[:, :, 1, step].clone()
+                # # update the distance from the RSU
+                dynamic_3 = dynamic_2 + 0.005 * ptr_quant
+                dynamic_3 = torch.where(dynamic_3 < 500, 500 - dynamic_3, dynamic_3 - 500)
+                dynamic[:, :, :, step + 1] = torch.cat([dynamic_1.repeat(1, 20).unsqueeze(2),
+                                                        dynamic_2.unsqueeze(2),
+                                                        dynamic_3.unsqueeze(2)], axis=2).clone()
             # After visiting a node update the dynamic representation
             # if self.update_fn is not None:
             #     dynamic = self.update_fn(dynamic, ptr.data)
