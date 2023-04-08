@@ -30,7 +30,7 @@ class TSPDataset(Dataset):
         torch.manual_seed(seed)
         pwr = torch.ones((loop, num_cars, 1, iteration)) * 0.1  # 0.09*torch.rand((loop, num_cars, 1, iteration)) + 0.01  #p [0.01,0.1]
         fre = 1*torch.rand((loop, num_cars, 1, iteration)) + 2  #f [2,3]
-        vel = 20 * torch.rand((loop, num_cars, 1, iteration)) + 60  # v [60, 80]
+        vel = 10 * torch.rand((loop, num_cars, 1, iteration)) + 10  # v [10, 20]
         rho = torch.rand((loop, num_cars, 1, iteration))
         rho = rho / torch.sum(rho)
         self.static = torch.cat([pwr, fre, vel, rho], 2) #（samples, cars number, (q,f,v)  iteration）
@@ -79,25 +79,27 @@ def reward(static, dynamic, action, w1=1, w2=0):
         dis = dynamic[:, :, 2, iter]
         snr = action[:, :, 2, iter] * torch.log2(1 + 0.01 * torch.multiply(static[:, :, 1, iter], torch.pow(dis, -2)))
         if iter == 0:
-            obj1[:, iter] =torch.sum(torch.div(action[:, :, 0, iter],
-                                               (2 ^ action[:, :, 1, iter] - 1) ^ 2), 1)
-            obj2_temp = torch.div(torch.multiply(action[:, :, 0, iter]*0.005,action[:, :, 1, iter]),static[:, :, 1, iter]) + \
-                torch.div(torch.multiply(action[:, :, 0, iter]*0.01, action[:, :, 1, iter]),snr)
+            obj1[:, iter] =torch.sum(action[:, :, 0, iter]*static[:, :, 3, iter]/
+                                               torch.pow(torch.pow(2, action[:, :, 1, iter]) - 1,2), 1)
+            obj2_temp = action[:, :, 0, iter]*0.002*action[:, :, 1, iter]/static[:, :, 1, iter] + \
+                action[:, :, 0, iter]*action[:, :, 1, iter]/(action[:, :, 2, iter]*320*\
+                                         torch.log2(1e7*static[:,:,0,iter]/(dynamic[:, :, 2, iter]*dynamic[:, :, 2, iter])))
             obj2[:, iter],idx = torch.max(obj2_temp,dim=1)
 
         else:
-            obj1[:, iter] = obj1[:, iter-1] + torch.sum(torch.div(action[:, :, 0, iter], (2 ^ action[:, :, 1, iter] - 1) ^ 2), 1)
-            obj2_temp = torch.div(torch.multiply(action[:, :, 0, iter] * 0.005, action[:, :, 1, iter]),
-                                  static[:, :, 1, iter]) + \
-                        torch.div(torch.multiply(action[:, :, 0, iter] * 0.01, action[:, :, 1, iter]), snr)
+            obj1[:, iter] = obj1[:, iter-1] + torch.sum(action[:, :, 0, iter]*static[:, :, 3, iter]/
+                                               torch.pow(torch.pow(2, action[:, :, 1, iter]) - 1,2), 1)
+            obj2_temp = action[:, :, 0, iter]*0.002*action[:, :, 1, iter]/static[:, :, 1, iter] + \
+                action[:, :, 0, iter]*action[:, :, 1, iter]/(action[:, :, 2, iter]*320*\
+                                         torch.log2(1e7*static[:,:,0,iter]/(dynamic[:, :, 2, iter]*dynamic[:, :, 2, iter])))
             obj2[:, iter], idx = torch.max(obj2_temp, dim=1)
             obj2[:, iter] = obj2[:, iter] + obj2[:, iter - 1]
     #     obj1[batch_size,iter] = obj1+torch.sum(action[:,:,0,:]/(2^action[:,:,1,:]-1)^2
 
         #obj2 = obj2+torch.max(action[0]*0.005*action[1]/static[1] + action[0]*0.01*action[1]/snr.squeeze(),dim=1)
 
-        obj[:,iter] = w1*obj1[:, iter] + w2*obj2[:, iter] - 0.01*torch.sum(action[:, :, 2, iter]-1,dim=1)
-    return obj, obj1, obj2
+        obj[:,iter] = w1*1e4*obj1[:, iter] + w2*obj2[:, iter] + 0.01*torch.sum(action[:, :, 2, iter]-1,dim=1)
+    return obj.detach(), obj1, obj2
 
 
 

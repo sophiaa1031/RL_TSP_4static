@@ -16,10 +16,11 @@ class Actor(nn.Module):
         # Define the encoder & decoder models
         self.static_encoder = nn.Linear(static_size, hidden_size)
         self.dynamic_encoder = nn.Linear(dynamic_size, hidden_size)
-        # self.bn = torch.nn.BatchNorm1d(num_cars, eps=1e-05)
+        self.static_bn = torch.nn.BatchNorm1d(static_size, eps=1e-05)
+        self.dynamic_bn = torch.nn.BatchNorm1d(dynamic_size, eps=1e-05)
         self.actor1_select = nn.Linear(hidden_size * 2, 2)
         self.actor2_quant = nn.Linear(hidden_size * 2, 32)
-        self.actor3_b = nn.Linear(hidden_size * 2, 1)
+        self.actor3_b = nn.Linear(hidden_size * 2, 2)
         self.iteration = iteration
 
         for p in self.parameters():
@@ -36,15 +37,42 @@ class Actor(nn.Module):
 
         whether_select_lst, quant_select_lst, b_lst = [], [], []
         whether_select_logp, quant_select_logp, b_logp = [], [], []
-        for step in range(max_steps - 1):
 
-            static_hidden = self.static_encoder(static[:, :, :, step])  # []
-            dynamic_hidden = self.dynamic_encoder(dynamic[:, :, :, step])
+
+        # batch_size, num_cars, features, steps = static.shape
+        # static = static.view(batch_size * num_cars, features, steps)
+        # static = self.static_bn(static.unsqueeze(2))  # Add a singleton dimension for 'height' and apply BN
+        # static = static.squeeze(2)  # Remove the singleton dimension for 'height'
+        # static = static.view(batch_size, num_cars, features, steps)
+        #
+        # batch_size, num_cars, features, steps = dynamic.shape
+        # dynamic = dynamic.view(batch_size * num_cars, features,
+        #                      steps)  # Reshape to [batch_size*num_cars, features, steps]
+        # # BatchNorm2d along feature dimension
+        # dynamic = self.dynamic_bn(dynamic.unsqueeze(2))  # Add a singleton dimension for 'height' and apply BN
+        # dynamic = dynamic.squeeze(2)  # Remove the singleton dimension for 'height'
+        # dynamic = dynamic.view(batch_size, num_cars, features, steps)
+
+        for step in range(max_steps - 1):
+            static_temp = static[:, :, :, step]
+            batch_size, num_cars, features = static_temp.shape
+            static_temp = static_temp.view(batch_size * num_cars, features)
+            static_temp = self.static_bn(static_temp)  # Add a singleton dimension for 'height' and apply BN
+            static_temp = static_temp.view(batch_size, num_cars, features)
+            static_hidden = self.static_encoder(static_temp)  # []
+
+            dynamic_temp = dynamic[:, :, :, step]
+            batch_size, num_cars, features = dynamic_temp.shape
+            dynamic_temp = dynamic_temp.view(batch_size * num_cars, features)  # Reshape to [batch_size*num_cars, features, steps]
+            # BatchNorm2d along feature dimension
+            dynamic_temp = self.dynamic_bn(dynamic_temp)  # Add a singleton dimension for 'height' and apply BN
+            dynamic_temp = dynamic_temp.view(batch_size, num_cars, features)
+            dynamic_hidden = self.dynamic_encoder(dynamic_temp)
             state = torch.cat((static_hidden, dynamic_hidden), 2)  # [batch_size,num_cars,2*hidden_size]
 
             whether_select = self.actor1_select(state)  # (batch_size,num_cars,2)
             quant_select = self.actor2_quant(state)  # (batch_size,num_cars,32)
-            bdw = torch.sigmoid(self.actor3_b(state))  # (batch_size,num_cars,1)
+            bdw = F.softmax(self.actor3_b(state), dim=2)[:,:,1]  # (batch_size,num_cars,1)
 
             whether_select_probs = F.softmax(whether_select, dim=2)  # (batch_size,num_cars,2)
             quant_probs = F.softmax(quant_select, dim=2)  # (batch_size,num_cars,32)
@@ -64,17 +92,18 @@ class Actor(nn.Module):
                 logp_select = prob_select.log()
 
             ptr_quant = ptr_quant + 1
-            # save the maximum latency in the last iteration
-            dynamic_1, _ = torch.max(0.005 * ptr_quant + 0.01 * ptr_quant / bdw.squeeze(), dim=1)  # (batch_size)
+            # # save the maximum latency in the last iteration
+            dynamic_1, _ = torch.max(0.002 * ptr_select.clone() * ptr_quant.clone()/static[:,:,1,step].clone() + ptr_select.clone()*ptr_quant.clone() / (
+                    320*bdw.detach()*torch.log2(1+(1e7*static[:,:,0,step].clone()/(dynamic[:, :, 2, step].clone()*dynamic[:, :, 2, step].clone())))), dim=1)  # (batch_size)
             dynamic_1 = dynamic_1.unsqueeze(1)  # (batch_size,1)
             # update the current travel distance
-            dynamic_2 = torch.mul(dynamic_1, static[:, :, 2, step]) + dynamic[:, :, 1, step]
-            # update the distance from the RSU
+            dynamic_2 = torch.mul(dynamic_1, static[:, :, 2, step].clone()) + dynamic[:, :, 1, step].clone()
+            # # update the distance from the RSU
             dynamic_3 = dynamic_2 + 0.005 * ptr_quant
             dynamic_3 = torch.where(dynamic_3 < 500, 500 - dynamic_3, dynamic_3 - 500)
             dynamic[:, :, :, step + 1] = torch.cat([dynamic_1.repeat(1, 20).unsqueeze(2),
                                                     dynamic_2.unsqueeze(2),
-                                                    dynamic_3.unsqueeze(2)], axis=2)
+                                                    dynamic_3.unsqueeze(2)], axis=2).clone()
             # After visiting a node update the dynamic representation
             # if self.update_fn is not None:
             #     dynamic = self.update_fn(dynamic, ptr.data)
@@ -93,16 +122,14 @@ class Actor(nn.Module):
             # 记录当前动作
             whether_select_lst.append(ptr_select.unsqueeze(2))
             quant_select_lst.append(ptr_quant.unsqueeze(2))
-            zero = torch.tensor(0).to(device)
-            one = torch.tensor(1).to(device)
-            b_lst.append(torch.where(bdw > 0.5, one, zero))
+            b_lst.append(bdw.unsqueeze(2))
             whether_select_logp.append(logp_select.unsqueeze(2))
             quant_select_logp.append(log_quant.unsqueeze(2))
-            b_logp.append(bdw)
+            b_logp.append(bdw.unsqueeze(2))
 
         whether_select_seq = torch.cat(whether_select_lst, 2).unsqueeze(2)
         quant_select_seq = torch.cat(quant_select_lst, 2).unsqueeze(2)
-        b_seq = torch.cat(b_lst, 2).unsqueeze(2)
+        b_seq = torch.cat(b_lst, 2).unsqueeze(2).detach()
         whether_select_logp_seq = torch.cat(whether_select_logp, 2).unsqueeze(2)
         quant_select_logp_seq = torch.cat(quant_select_logp, 2).unsqueeze(2)
         b_logp_seq = torch.cat(b_logp, 2).unsqueeze(2)
