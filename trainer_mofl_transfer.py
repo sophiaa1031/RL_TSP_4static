@@ -17,7 +17,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader
-
+torch.autograd.set_detect_anomaly(True)
 from model_fl import Actor
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -34,15 +34,16 @@ class StateCritic(nn.Module):
     the encoder + decoder, and returns an estimate of complexity
     """
 
-    def __init__(self, static_size, dynamic_size, hidden_size):
+    def __init__(self, static_size, dynamic_size, hidden_size,num_cars):
         super(StateCritic, self).__init__()
 
-        self.static_encoder = nn.Linear(static_size, hidden_size)
-        self.dynamic_encoder = nn.Linear(dynamic_size, hidden_size)
-
+        self.static_encoder = nn.Linear(static_size*num_cars, hidden_size)
+        self.dynamic_encoder = nn.Linear(dynamic_size*num_cars, hidden_size)
+        self.static_bn = torch.nn.BatchNorm2d(static_size, eps=1e-05)
+        self.dynamic_bn = torch.nn.BatchNorm2d(dynamic_size, eps=1e-05)
         # Define the encoder & decoder models
-        self.fc1 = nn.Linear(hidden_size * 2, 32)
-        self.fc2 = nn.Linear(32, 1)
+        self.fc1 = nn.Linear(hidden_size*2,hidden_size)
+        self.fc2 = nn.Linear(hidden_size, 1)
 
         for p in self.parameters():
             if len(p.shape) > 1:
@@ -50,15 +51,28 @@ class StateCritic(nn.Module):
         print('init over')
 
     def forward(self, static, dynamic):
-        batch_size, input_size, sequence_size = static.size()
-        # Use the probabilities of visiting each
-        static_hidden = self.static_encoder(static.view(batch_size, -1))
-        dynamic_hidden = self.dynamic_encoder(dynamic.view(batch_size, -1))
+        batch_size, num_cars, features, steps = static.shape
+        static = static.view(batch_size * num_cars, features, steps)
+        static = self.static_bn(static.unsqueeze(2))  # Add a singleton dimension for 'height' and apply BN
+        static = static.squeeze(2)  # Remove the singleton dimension for 'height'
+        static = static.view(batch_size, num_cars*features, steps)
+        static_hidden = self.static_encoder(static.transpose(2,1))
 
-        hidden = torch.cat((static_hidden, dynamic_hidden), 1)
+
+        batch_size, num_cars, features, steps = dynamic.shape
+        dynamic = dynamic.view(batch_size * num_cars, features,
+                               steps)  # Reshape to [batch_size*num_cars, features, steps]
+        # BatchNorm2d along feature dimension
+        dynamic = self.dynamic_bn(dynamic.unsqueeze(2))  # Add a singleton dimension for 'height' and apply BN
+        dynamic = dynamic.squeeze(2)  # Remove the singleton dimension for 'height'
+        dynamic = dynamic.view(batch_size, num_cars*features, steps)
+        dynamic_hidden = self.dynamic_encoder(dynamic.transpose(2,1))
+
+
+        hidden = torch.cat((static_hidden, dynamic_hidden), 2)
 
         output = F.relu(self.fc1(hidden))
-        output = self.fc2(output)
+        output = self.fc2(output).squeeze()
         return output
 
 
@@ -84,7 +98,7 @@ def validate(data_loader, actor, reward_fn, w1, w2, render_fn=None, save_dir='.'
         x0 = x0.to(device) if len(x0) > 0 else None
 
         with torch.no_grad():
-            action, _ = actor.forward(static, dynamic, x0)
+            action, _ = actor(static, dynamic)
 
         reward, obj1, obj2 = reward_fn(static, dynamic, action, w1, w2)
 
@@ -149,13 +163,16 @@ def train(actor, critic, w1, w2, task, num_cars, train_data, valid_data, reward_
             reward, obj1, obj2 = reward_fn(static, dynamic, action, w1, w2)
 
             # Critic评估状态价值
-            critic_est = critic(static, dynamic).view(-1)
+            critic_est = critic(static[:,:,:,:-1], dynamic[:,:,:,:-1]).view(-1)
 
             # 计算优势函数
-            advantage = (reward - critic_est)
+            advantage = (reward.view(-1) - critic_est)
 
             # Actor参数更新
-            actor_loss = torch.mean(advantage.detach() * action_logp.sum(dim=1))  # 计算Actor的损失函数
+            actor_loss1 = torch.mean(advantage.detach() * action_logp[:,:,0,:].sum(dim=1).view(-1))  # 计算Actor的损失函数
+            actor_loss2 = torch.mean(advantage.detach() * action_logp[:, :, 1, :].sum(dim=1).view(-1))  # 计算Actor的损失函数
+            actor_loss3 = torch.mean(advantage.detach() * action_logp[:, :, 2, :].sum(dim=1).view(-1))  # 计算Actor的损失函数
+            actor_loss = actor_loss1 + actor_loss2 + actor_loss3
             actor_optim.zero_grad()
             actor_loss.backward()  # 反向传播计算梯度
             torch.nn.utils.clip_grad_norm_(actor.parameters(), max_grad_norm)
@@ -256,7 +273,10 @@ def train_tsp(args, w1=1, w2=0, checkpoint=None):
                   args.iteration,
                   args.num_cars).to(device)  # 定义一个Actor模型
 
-    critic = StateCritic(args.static_size, args.dynamic_size, args.hidden_size).to(device)  # 定义一个Critic模型
+    critic = StateCritic(args.static_size,
+                         args.dynamic_size,
+                         args.hidden_size,
+                         args.num_cars).to(device)  # 定义一个Critic模型
 
     kwargs = vars(args)
     kwargs['train_data'] = train_data
@@ -298,7 +318,7 @@ if __name__ == '__main__':
     parser.add_argument('--layers', dest='num_layers', default=1, type=int)
     parser.add_argument('--train-size', default=1000, type=int)
     parser.add_argument('--valid-size', default=1000, type=int)
-    parser.add_argument('---iteration', default=10, type=int)
+    parser.add_argument('---iteration', default=11, type=int)
     parser.add_argument('---static_size', default=4, type=int)
     parser.add_argument('---dynamic_size', default=3, type=int)
     parser.add_argument('---subproblem_size', default=5, type=int)
