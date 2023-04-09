@@ -48,7 +48,6 @@ class StateCritic(nn.Module):
         for p in self.parameters():
             if len(p.shape) > 1:
                 nn.init.xavier_uniform_(p)
-        print('init over')
 
     def forward(self, static, dynamic):
         batch_size, num_cars, features, steps = static.shape
@@ -193,7 +192,7 @@ def train(actor, critic, w1, w2, task, num_cars, train_data, valid_data, reward_
             obj2s.append(torch.mean(obj2.detach()).item())
 
             if (batch_idx + 1) % 200 == 0:
-                print("\n")
+                # print("\n")
                 end = time.time()
                 times.append(end - start)
                 start = end
@@ -242,7 +241,7 @@ def train(actor, critic, w1, w2, task, num_cars, train_data, valid_data, reward_
             torch.save(critic.state_dict(), save_path)
 
         print('Mean epoch loss/reward: %2.4f, %2.4f, %2.4f, obj1_valid: %2.3f, obj2_valid: %2.3f. took: %2.4fs ' \
-              '(%2.4fs / 100 batches)\n' % \
+              '(%2.4fs / 100 batches)' % \
               (mean_loss, mean_reward, mean_valid, mean_obj1_valid, mean_obj2_valid, time.time() - epoch_start,
                np.mean(times)))
     print("Total run time of epoches: %2.4f" % (time.time() - start_total))
@@ -298,7 +297,8 @@ def train_tsp(args, w1=1, w2=0, checkpoint=None):
     test_loader = DataLoader(test_data, args.valid_size, False, num_workers=0)
     out = validate(test_loader, actor, flvn.reward, w1, w2, flvn.render, test_dir, num_plot=5)
 
-    print('w1=%2.2f,w2=%2.2f. Average tour length: ' % (w1, w2), out)
+    print('w1=%2.2f,w2=%2.2f. Average objectives: ' % (w1, w2), out)
+    print('')
 
 
 if __name__ == '__main__':
