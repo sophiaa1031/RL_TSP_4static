@@ -136,6 +136,10 @@ def train(actor, critic, w1, w2, task, num_cars, train_data, valid_data, reward_
     best_params = None
     best_reward = np.inf
     start_total = time.time()
+    valid_reward = []
+    train_loss = []
+    train_reward = []
+
     for epoch in range(3):
         print("epoch %d start:" % epoch)
         actor.train()  # model train -> dropout   training ->dropout 随机丢弃掉一些神经元0.3    testing  dropout 值*0.3
@@ -207,6 +211,8 @@ def train(actor, critic, w1, w2, task, num_cars, train_data, valid_data, reward_
 
         mean_loss = np.mean(losses)
         mean_reward = np.mean(rewards)
+        train_loss.append(mean_loss)
+        train_reward.append(mean_reward)
 
         # Save the weights
         # epoch_dir = os.path.join(checkpoint_dir, '%s' % epoch)
@@ -223,7 +229,7 @@ def train(actor, critic, w1, w2, task, num_cars, train_data, valid_data, reward_
         # valid_dir = os.path.join(save_dir, '%s' % epoch)
         mean_valid, mean_obj1_valid, mean_obj2_valid = validate(valid_loader, actor, reward_fn, w1, w2, render_fn,
                                                                 '.', num_plot=5)
-
+        valid_reward.append(mean_valid)
         # Save best model parameters
         if mean_valid < best_reward:
             best_reward = mean_valid
@@ -245,6 +251,7 @@ def train(actor, critic, w1, w2, task, num_cars, train_data, valid_data, reward_
               (mean_loss, mean_reward, mean_valid, mean_obj1_valid, mean_obj2_valid, time.time() - epoch_start,
                np.mean(times)))
     print("Total run time of epoches: %2.4f" % (time.time() - start_total))
+    return train_loss,train_reward,valid_reward
 
 
 def train_tsp(args, w1=1, w2=0, checkpoint=None):
@@ -291,13 +298,20 @@ def train_tsp(args, w1=1, w2=0, checkpoint=None):
         critic.load_state_dict(torch.load(path, device))
 
     if not args.test:
-        train(actor, critic, w1, w2, **kwargs)
+        train_loss,train_reward,valid_reward = train(actor, critic, w1, w2, **kwargs)
 
     test_dir = 'test'
     test_loader = DataLoader(test_data, args.valid_size, False, num_workers=0)
     out = validate(test_loader, actor, flvn.reward, w1, w2, flvn.render, test_dir, num_plot=5)
 
     print('w1=%2.2f,w2=%2.2f. Average objectives: ' % (w1, w2), out)
+    f = open('figure/{}_{}.txt'.format(w1,w2),'w')
+    f.write('train_loss:')
+    f.write(','.join(map(str,train_loss)))
+    f.write('\ntrain_reward:')
+    f.write(','.join(map(str,train_reward)))
+    f.write('\nvalid_reward:')
+    f.write(','.join(map(str,valid_reward)))
     print('')
 
 
