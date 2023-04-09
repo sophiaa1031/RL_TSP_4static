@@ -191,7 +191,7 @@ def train(actor, critic, w1, w2, task, num_cars, train_data, valid_data, reward_
             obj1s.append(torch.mean(obj1.detach()).item())
             obj2s.append(torch.mean(obj2.detach()).item())
 
-            if (batch_idx + 1) % 200 == 0:
+            if (batch_idx + 1) % 2 == 0:
                 # print("\n")
                 end = time.time()
                 times.append(end - start)
@@ -240,7 +240,7 @@ def train(actor, critic, w1, w2, task, num_cars, train_data, valid_data, reward_
             save_path = os.path.join(main_dir, 'critic.pt')
             torch.save(critic.state_dict(), save_path)
 
-        print('Mean epoch loss/reward: %2.4f, %2.4f, %2.4f, obj1_valid: %2.3f, obj2_valid: %2.3f. took: %2.4fs ' \
+        print('Mean epoch loss/reward/valid: %2.4f, %2.4f, %2.4f, obj1_valid: %2.3f, obj2_valid: %2.3f. took: %2.4fs ' \
               '(%2.4fs / 100 batches)' % \
               (mean_loss, mean_reward, mean_valid, mean_obj1_valid, mean_obj2_valid, time.time() - epoch_start,
                np.mean(times)))
