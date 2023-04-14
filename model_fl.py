@@ -118,7 +118,7 @@ class Actor(nn.Module):
             # 记录当前动作
             whether_select_lst.append(ptr_select.unsqueeze(2))
             quant_select_lst.append(ptr_quant.unsqueeze(2))
-            b_lst.append(bdw.unsqueeze(2)/self.num_cars)
+            b_lst.append(bdw.unsqueeze(2))
             whether_select_logp.append(logp_select.unsqueeze(2))
             quant_select_logp.append(log_quant.unsqueeze(2))
             b_logp.append(bdw.unsqueeze(2))
