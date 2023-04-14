@@ -1,9 +1,9 @@
 import torch
-from tasks import motsp
-from tasks.motsp import TSPDataset, reward
+from tasks import flvn
+from tasks.flvn import TSPDataset, reward
 from torch.utils.data import DataLoader
-from model import DRL4TSP
-from trainer_motsp_transfer import StateCritic
+from model_fl import Actor
+from trainer_mofl_transfer import StateCritic
 import numpy as np
 import os
 import matplotlib.pyplot as plt
@@ -21,17 +21,19 @@ save_dir = "../tsp_transfer_100run_500000_5epoch_40city/40"
 # param
 update_fn = None
 STATIC_SIZE = 4  # (x, y)
-DYNAMIC_SIZE = 1  # dummy for compatibility
+DYNAMIC_SIZE = 3  # dummy for compatibility
 
 # claim model
-actor = DRL4TSP(STATIC_SIZE,
+actor = Actor(STATIC_SIZE,
                 DYNAMIC_SIZE,
                 128,
                 update_fn,
-                motsp.update_mask,
+                flvn.update_mask,
                 1,
-                0.1).to(device)
-critic = StateCritic(STATIC_SIZE, DYNAMIC_SIZE, 128).to(device)
+                0.1,
+              20,
+              10).to(device)
+critic = StateCritic(STATIC_SIZE, DYNAMIC_SIZE, 128,10).to(device)
 
 # data 143
 from Post_process.convet_kro_dataloader import Kro_dataset

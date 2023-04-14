@@ -9,7 +9,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 class Actor(nn.Module):
     def __init__(self, static_size, dynamic_size, hidden_size,
-                 update_fn=None, mask_fn=None, num_layers=1, dropout=0., iteration=10, num_cars=10):
+                 update_fn=None, mask_fn=None, num_layers=1, dropout=0., iteration=20, num_cars=10):
         super(Actor, self).__init__()
         self.update_fn = update_fn
         self.mask_fn = update_fn
@@ -17,11 +17,12 @@ class Actor(nn.Module):
         self.static_encoder = nn.Linear(static_size, hidden_size)
         self.dynamic_encoder = nn.Linear(dynamic_size, hidden_size)
         self.static_bn = torch.nn.BatchNorm1d(static_size, eps=1e-05)
-        self.dynamic_bn = torch.nn.BatchNorm1d(dynamic_size, eps=1e-05)
+        self.dynamic_bn = torch.nn.BatchNorm1d(dynamic_size, eps=1e-05) # 对输入张量进行归一化操作
         self.actor1_select = nn.Linear(hidden_size * 2, 2)
         self.actor2_quant = nn.Linear(hidden_size * 2, 32)
         self.actor3_b = nn.Linear(hidden_size * 2, 2)
         self.iteration = iteration
+        self.num_cars = num_cars
 
         for p in self.parameters():
             if len(p.shape) > 1:
@@ -29,7 +30,7 @@ class Actor(nn.Module):
 
     def forward(self, static, dynamic):
 
-        max_steps = self.iteration  # if self.mask_fn is None else 50
+        # max_steps = self.iteration  # if self.mask_fn is None else 50
 
         # Static elements only need to be processed once, and can be used across
         # all 'pointing' iterations. When / if the dynamic elements change,
@@ -53,14 +54,14 @@ class Actor(nn.Module):
         # dynamic = dynamic.squeeze(2)  # Remove the singleton dimension for 'height'
         # dynamic = dynamic.view(batch_size, num_cars, features, steps)
 
-        for step in range(max_steps - 1):
+        for step in range(self.iteration):
+            # 更新state网络层
             static_temp = static[:, :, :, step]
             batch_size, num_cars, features = static_temp.shape
             static_temp = static_temp.view(batch_size * num_cars, features)
             static_temp = self.static_bn(static_temp)  # Add a singleton dimension for 'height' and apply BN
             static_temp = static_temp.view(batch_size, num_cars, features)
             static_hidden = self.static_encoder(static_temp)  # []
-
             dynamic_temp = dynamic[:, :, :, step].clone()
             batch_size, num_cars, features = dynamic_temp.shape
             dynamic_temp = dynamic_temp.view(batch_size * num_cars, features)  # Reshape to [batch_size*num_cars, features, steps]
@@ -70,20 +71,21 @@ class Actor(nn.Module):
             dynamic_hidden = self.dynamic_encoder(dynamic_temp)
             state = torch.cat((static_hidden, dynamic_hidden), 2)  # [batch_size,num_cars,2*hidden_size]
 
+            # 根据state输出action
             whether_select = self.actor1_select(state)  # (batch_size,num_cars,2)
             quant_select = self.actor2_quant(state)  # (batch_size,num_cars,32)
-            bdw = F.softmax(self.actor3_b(state), dim=2)[:,:,1]  # (batch_size,num_cars,1)
-
+            bdw_beforenorm = F.softmax(self.actor3_b(state), dim=2)[:,:,1]
+            bdw = bdw_beforenorm/(torch.sum(bdw_beforenorm,dim=1).unsqueeze(1).repeat(1, num_cars))  # (batch_size,num_cars,1)
             whether_select_probs = F.softmax(whether_select, dim=2)  # (batch_size,num_cars,2)
             quant_probs = F.softmax(quant_select, dim=2)  # (batch_size,num_cars,32)
 
+            # 根据概率分布选择一个动作action
             if self.training:
-                # 根据概率分布选择一个动作
                 quant_cate = torch.distributions.Categorical(quant_probs)
                 select_cate = torch.distributions.Categorical(whether_select_probs)
                 ptr_quant = quant_cate.sample()  # (batch, num_cars)
                 log_quant = quant_cate.log_prob(ptr_quant)  # (batch, num_cars)
-                ptr_select = select_cate.sample()  ##(batch, num_cars)
+                ptr_select = select_cate.sample()  # (batch, num_cars)
                 logp_select = select_cate.log_prob(ptr_select)  # (batch, num_cars)
             else:
                 prob_quant, ptr_quant = torch.max(quant_probs, 2)  # Greedy
@@ -91,51 +93,46 @@ class Actor(nn.Module):
                 prob_select, ptr_select = torch.max(whether_select_probs, 2)  # Greedy
                 logp_select = prob_select.log()
 
+            # 更新动态state (dynamic)
             with torch.no_grad():
                 ptr_quant = ptr_quant + 1
-                # # save the maximum latency in the last iteration
-                dynamic_1, _ = torch.max(0.002 * ptr_select.clone() * ptr_quant.clone()/static[:,:,1,step].clone() + ptr_select.clone()*ptr_quant.clone() / (
-                        320*bdw.detach()*torch.log2(1+(1e7*static[:,:,0,step].clone()/(dynamic[:, :, 2, step].clone()*dynamic[:, :, 2, step].clone())))), dim=1)  # (batch_size)
-                dynamic_1 = dynamic_1.unsqueeze(1)  # (batch_size,1)
+                # save the maximum latency in the last iteration
+                rate = bdw.detach() * 10 * torch.log2(1+1e7 * static[:, :, 0, step].clone() * torch.pow(dynamic[:, :, 2, step].clone(), -2))
+                dynamic_0, _ = torch.max(0.002 * ptr_quant.clone()/static[:,:,1,step].clone() + ptr_quant.clone()/32 / rate, dim=1)  # (batch_size)
+                # dynamic_0, _ = torch.max(0.002 * ptr_select.clone() * ptr_quant.clone() / static[:, :, 1,step].clone() + ptr_select.clone() * ptr_quant.clone() /
+                #    (320 * bdw.detach() * torch.log2(1 + (1e7 * static[:, :, 0, step].clone() / (dynamic[:, :, 2, step].clone() * dynamic[:, :, 2,step].clone())))),dim=1)  # (batch_size)
+                dynamic_0 = dynamic_0.unsqueeze(1)  # (batch_size,1)
                 # update the current travel distance
-                dynamic_2 = torch.mul(dynamic_1, static[:, :, 2, step].clone()) + dynamic[:, :, 1, step].clone()
-                # # update the distance from the RSU
-                dynamic_3 = dynamic_2 + 0.005 * ptr_quant
-                dynamic_3 = torch.where(dynamic_3 < 500, 500 - dynamic_3, dynamic_3 - 500)
-                dynamic[:, :, :, step + 1] = torch.cat([dynamic_1.repeat(1, 20).unsqueeze(2),
-                                                        dynamic_2.unsqueeze(2),
-                                                        dynamic_3.unsqueeze(2)], axis=2).clone()
-            # After visiting a node update the dynamic representation
-            # if self.update_fn is not None:
-            #     dynamic = self.update_fn(dynamic, ptr.data)
-            #     dynamic_hidden = self.dynamic_encoder(dynamic)
-            #
-            #     # Since we compute the VRP in minibatches, some tours may have
-            #     # number of stops. We force the vehicles to remain at the depot
-            #     # in these cases, and logp := 0
-            #     is_done = dynamic[:, 1].sum(1).eq(0).float()
-            #     logp = logp * (1. - is_done)
-            #
-            # # And update the mask so we don't re-visit if we don't need to
-            # if self.mask_fn is not None:
-            #     mask = self.mask_fn(mask, dynamic, ptr.data).detach()
+                dynamic_1 = torch.mul(dynamic_0, static[:, :, 2, step].clone()) + dynamic[:, :, 1, step].clone()
+                # update the distance from the RSU
+                dynamic_2 = dynamic_1 + 0.005 * ptr_quant
+                dynamic_2 = torch.sqrt(torch.pow(dynamic_2 - 300,2)+10**2)
+                if torch.any(dynamic_2>301):
+                    print('1')
+                dynamic[:, :, :, step + 1] = torch.cat([dynamic_0.repeat(1, num_cars).unsqueeze(2),
+                                                        dynamic_1.unsqueeze(2),
+                                                        dynamic_2.unsqueeze(2)], axis=2).clone()
+                if torch.isnan(dynamic).any().item() or torch.isinf(dynamic).any().item():
+                    print('1')
 
             # 记录当前动作
             whether_select_lst.append(ptr_select.unsqueeze(2))
             quant_select_lst.append(ptr_quant.unsqueeze(2))
-            b_lst.append(bdw.unsqueeze(2))
+            b_lst.append(bdw.unsqueeze(2)/self.num_cars)
             whether_select_logp.append(logp_select.unsqueeze(2))
             quant_select_logp.append(log_quant.unsqueeze(2))
             b_logp.append(bdw.unsqueeze(2))
 
+        # 更新动作action空间
         whether_select_seq = torch.cat(whether_select_lst, 2).unsqueeze(2)
         quant_select_seq = torch.cat(quant_select_lst, 2).unsqueeze(2)
         b_seq = torch.cat(b_lst, 2).unsqueeze(2).detach()
+        action = torch.cat([whether_select_seq, quant_select_seq, b_seq],
+                           dim=2)  # (batch_size, num_cars,action_size, seq_len)
+
         whether_select_logp_seq = torch.cat(whether_select_logp, 2).unsqueeze(2)
         quant_select_logp_seq = torch.cat(quant_select_logp, 2).unsqueeze(2)
         b_logp_seq = torch.cat(b_logp, 2).unsqueeze(2)
-        action = torch.cat([whether_select_seq, quant_select_seq, b_seq],
-                           dim=2)  # (batch_size, num_cars,action_size, seq_len)
         action_logp = torch.cat([whether_select_logp_seq, quant_select_logp_seq, b_logp_seq],
                                 dim=2)  # (batch_size, num_cars,action_size, seq_len) # (batch_size, seq_len)
 
