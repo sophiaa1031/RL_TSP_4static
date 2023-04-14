@@ -16,11 +16,13 @@ from torch.utils.data import Dataset
 import matplotlib
 # matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+import math
 
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-class TSPDataset(Dataset):
+class TSPDataset(Dataset):  # 初始化生成训练数据
 
-    def __init__(self, num_cars=20, loop=1e6, iteration=10, seed=None):
+    def __init__(self, train_size=1e6, num_cars=10, iteration=20, seed=None):
         super(TSPDataset, self).__init__()
 
         if seed is None:
@@ -28,18 +30,19 @@ class TSPDataset(Dataset):
 
         np.random.seed(seed)
         torch.manual_seed(seed)
-        pwr = torch.ones((loop, num_cars, 1, iteration)) * 0.1  # 0.09*torch.rand((loop, num_cars, 1, iteration)) + 0.01  #p [0.01,0.1]
-        fre = 1*torch.rand((loop, num_cars, 1, iteration)) + 2  #f [2,3]
-        vel = 10 * torch.rand((loop, num_cars, 1, iteration)) + 10  # v [10, 20]
-        rho = torch.rand((loop, num_cars, 1, iteration))
+        pwr = torch.ones((train_size, num_cars, 1, iteration+1)) * 0.1  # 0.09*torch.rand((train_size, num_cars, 1, iteration)) + 0.01  #p [0.01,0.1]
+        fre = torch.ones((train_size, num_cars, 1, iteration+1)) * 2  # 1*torch.rand((train_size, num_cars, 1, iteration)) + 2  #f [2,3]
+        vel = 5 * torch.rand((train_size, num_cars, 1, iteration+1)) + 15  # v [15, 20]
+        rho = torch.rand((train_size, num_cars, 1, iteration+1))
         rho = rho / torch.sum(rho)
         self.static = torch.cat([pwr, fre, vel, rho], 2) #（samples, cars number, (q,f,v)  iteration）
-        latency_itr = torch.zeros(loop, num_cars, 1, iteration)
-        travel_dis = torch.zeros(loop, num_cars, 1, iteration)
-        rsu_dis = torch.ones(loop, num_cars, 1, iteration)*500
+
+        latency_itr = torch.zeros(train_size, num_cars, 1, iteration+1)
+        travel_dis = torch.zeros(train_size, num_cars, 1, iteration+1)
+        rsu_dis = torch.ones(train_size, num_cars, 1, iteration+1)*301 # math.sqrt(300**2+10**2)
         self.dynamic = torch.cat([latency_itr, travel_dis, rsu_dis], 2)  #（samples, (latency, travel distance, distance), cars number）
         self.num_cars = num_cars
-        self.size = loop
+        self.size = train_size
 
 
     def __len__(self):
@@ -71,35 +74,34 @@ def reward(static, dynamic, action, w1=1, w2=0):
     #static  [batch_size,num_cars,features,iteration]
     # dynamic  [batch_size,num_cars,features,iteration]
     # action  [batch_size,num_cars,action,iteration-1]
-    batch_size, num_cars, _, iteration = static.shape
-    obj1 = torch.zeros([batch_size,iteration-1]) #
-    obj2 = torch.zeros([batch_size, iteration - 1]) #
-    obj = torch.zeros([batch_size, iteration - 1])
-    for iter in range(iteration - 1):
+    batch_size, num_cars, _, round = static.shape
+    iteration = round - 1
+    obj1 = torch.zeros([batch_size,iteration]).to(device) #
+    obj2 = torch.zeros([batch_size, iteration]).to(device) #
+    obj = torch.zeros([batch_size, iteration]).to(device)
+    for iter in range(iteration):
         dis = dynamic[:, :, 2, iter]
-        snr = action[:, :, 2, iter] * torch.log2(1 + 0.01 * torch.multiply(static[:, :, 1, iter], torch.pow(dis, -2)))
+        rate = action[:, :, 2, iter]*10*torch.log2(1+1e7*static[:,:,0,iter]*torch.pow(dis, -2))
         if iter == 0:
-            obj1[:, iter] =torch.sum(action[:, :, 0, iter]*static[:, :, 3, iter]/
-                                               torch.pow(torch.pow(2, action[:, :, 1, iter]) - 1,2), 1)
-            obj2_temp = action[:, :, 0, iter]*0.002*action[:, :, 1, iter]/static[:, :, 1, iter] + \
-                action[:, :, 0, iter]*action[:, :, 1, iter]/(action[:, :, 2, iter]*320*\
-                                         torch.log2(1e7*static[:,:,0,iter]/(dynamic[:, :, 2, iter]*dynamic[:, :, 2, iter])))
+            obj1[:, iter] = torch.sum(static[:, :, 3, iter]/
+                                               torch.pow(torch.pow(2, action[:, :, 1, iter]) - 1,2), dim=1)
+            obj2_temp = 0.002*action[:, :, 1, iter]/static[:, :, 1, iter] + \
+               action[:, :, 1, iter]/32/rate
             obj2[:, iter],idx = torch.max(obj2_temp,dim=1)
 
         else:
-            obj1[:, iter] = obj1[:, iter-1] + torch.sum(action[:, :, 0, iter]*static[:, :, 3, iter]/
+            obj1[:, iter] = obj1[:, iter-1] + torch.sum(static[:, :, 3, iter]/
                                                torch.pow(torch.pow(2, action[:, :, 1, iter]) - 1,2), 1)
-            obj2_temp = action[:, :, 0, iter]*0.002*action[:, :, 1, iter]/static[:, :, 1, iter] + \
-                action[:, :, 0, iter]*action[:, :, 1, iter]/(action[:, :, 2, iter]*320*\
-                                         torch.log2(1e7*static[:,:,0,iter]/(dynamic[:, :, 2, iter]*dynamic[:, :, 2, iter])))
+            obj2_temp = 0.002*action[:, :, 1, iter]/static[:, :, 1, iter] + \
+              action[:, :, 1, iter]/32/rate
             obj2[:, iter], idx = torch.max(obj2_temp, dim=1)
             obj2[:, iter] = obj2[:, iter] + obj2[:, iter - 1]
     #     obj1[batch_size,iter] = obj1+torch.sum(action[:,:,0,:]/(2^action[:,:,1,:]-1)^2
 
         #obj2 = obj2+torch.max(action[0]*0.005*action[1]/static[1] + action[0]*0.01*action[1]/snr.squeeze(),dim=1)
 
-        obj[:,iter] = w1*1e4*obj1[:, iter] + w2*obj2[:, iter] + 0.01*torch.sum(action[:, :, 2, iter]-1,dim=1)
-    return obj.detach(), 1e4*obj1, obj2
+        obj[:,iter] = -w1*1e5*obj1[:, iter] - w2*obj2[:, iter] + 1e-2/num_cars*(torch.sum(rate-1, dim=1))
+    return obj.detach(), 1e5*obj1, obj2
 
 
 

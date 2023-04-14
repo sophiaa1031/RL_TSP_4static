@@ -1,2 +1,4 @@
 *.pt
 figure/*
+*.pyc
+*__pycache__*
