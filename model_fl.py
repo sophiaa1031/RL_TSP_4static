@@ -18,7 +18,7 @@ class Actor(nn.Module):
         self.dynamic_encoder = nn.Linear(dynamic_size, hidden_size)
         self.static_bn = torch.nn.BatchNorm1d(static_size, eps=1e-05)
         self.dynamic_bn = torch.nn.BatchNorm1d(dynamic_size, eps=1e-05) # 对输入张量进行归一化操作
-        self.actor1_select = nn.Linear(hidden_size * 2, 2)
+        # self.actor1_select = nn.Linear(hidden_size * 2, 2)
         self.actor2_quant = nn.Linear(hidden_size * 2, 32)
         self.actor3_b = nn.Linear(hidden_size * 2, 2)
         self.iteration = iteration
@@ -72,7 +72,8 @@ class Actor(nn.Module):
             state = torch.cat((static_hidden, dynamic_hidden), 2)  # [batch_size,num_cars,2*hidden_size]
 
             # 根据state输出action
-            whether_select = self.actor1_select(state)  # (batch_size,num_cars,2)
+            # whether_select = self.actor1_select(state)  # (batch_size,num_cars,2)
+            whether_select = torch.ones(batch_size,num_cars,2)
             quant_select = self.actor2_quant(state)  # (batch_size,num_cars,32)
             bdw_beforenorm = F.softmax(self.actor3_b(state), dim=2)[:,:,1]
             bdw = bdw_beforenorm/(torch.sum(bdw_beforenorm,dim=1).unsqueeze(1).repeat(1, num_cars))  # (batch_size,num_cars,1)

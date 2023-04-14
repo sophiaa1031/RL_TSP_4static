@@ -175,10 +175,10 @@ def train(actor, critic, w1, w2, task, num_cars, train_data, valid_data, reward_
             advantage = (reward.view(-1) - critic_est)
 
             # Actor参数更新
-            actor_loss1 = torch.mean(advantage.detach() * action_logp[:,:,0,:].sum(dim=1).view(-1))  # 计算Actor的损失函数
+            # actor_loss1 = torch.mean(advantage.detach() * action_logp[:,:,0,:].sum(dim=1).view(-1))  # 计算Actor的损失函数
             actor_loss2 = torch.mean(advantage.detach() * action_logp[:, :, 1, :].sum(dim=1).view(-1))  # 计算Actor的损失函数
             actor_loss3 = torch.mean(advantage.detach() * action_logp[:, :, 2, :].sum(dim=1).view(-1))  # 计算Actor的损失函数
-            actor_loss = actor_loss1 + actor_loss2 + actor_loss3
+            actor_loss = actor_loss2 + actor_loss3
             actor_optim.zero_grad()
             actor_loss.backward()  # 反向传播计算梯度
             torch.nn.utils.clip_grad_norm_(actor.parameters(), max_grad_norm)
