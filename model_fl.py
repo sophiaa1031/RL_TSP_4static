@@ -19,7 +19,7 @@ class Actor(nn.Module):
         self.static_bn = torch.nn.BatchNorm1d(static_size, eps=1e-05)
         self.dynamic_bn = torch.nn.BatchNorm1d(dynamic_size, eps=1e-05) # 对输入张量进行归一化操作
         # self.actor1_select = nn.Linear(hidden_size * 2, 2)
-        self.actor2_quant = nn.Linear(hidden_size * 2, 32)
+        self.actor2_quant = nn.Linear(hidden_size * 2, 9)
         self.actor3_b = nn.Linear(hidden_size * 2, 2)
         self.iteration = iteration
         self.num_cars = num_cars
@@ -74,7 +74,7 @@ class Actor(nn.Module):
             # 根据state输出action
             # whether_select = self.actor1_select(state)  # (batch_size,num_cars,2)
             whether_select = torch.ones(batch_size,num_cars,2).to(device)
-            quant_select = self.actor2_quant(state)  # (batch_size,num_cars,32)
+            quant_select = self.actor2_quant(state) # (batch_size,num_cars,32)
             bdw_beforenorm = F.softmax(self.actor3_b(state), dim=2)[:,:,1]
             bdw = bdw_beforenorm/(torch.sum(bdw_beforenorm,dim=1).unsqueeze(1).repeat(1, num_cars))  # (batch_size,num_cars,1)
             whether_select_probs = F.softmax(whether_select, dim=2)  # (batch_size,num_cars,2)
@@ -84,7 +84,7 @@ class Actor(nn.Module):
             if self.training:
                 quant_cate = torch.distributions.Categorical(quant_probs)
                 select_cate = torch.distributions.Categorical(whether_select_probs)
-                ptr_quant = quant_cate.sample()  # (batch, num_cars)
+                ptr_quant = quant_cate.sample()# (batch, num_cars)
                 log_quant = quant_cate.log_prob(ptr_quant)  # (batch, num_cars)
                 ptr_select = select_cate.sample()  # (batch, num_cars)
                 logp_select = select_cate.log_prob(ptr_select)  # (batch, num_cars)
@@ -96,7 +96,7 @@ class Actor(nn.Module):
 
             # 更新动态state (dynamic)
             with torch.no_grad():
-                ptr_quant = ptr_quant + 1
+                ptr_quant = ptr_quant + 8 # 量化程度为[8,16]
                 # save the maximum latency in the last iteration
                 rate = bdw.detach() * 10 * torch.log2(1+1e7 * static[:, :, 0, step].clone() * torch.pow(dynamic[:, :, 2, step].clone(), -2))
                 dynamic_0, _ = torch.max(0.002 * ptr_quant.clone()/static[:,:,1,step].clone() + ptr_quant.clone()/32 / rate, dim=1)  # (batch_size)

@@ -17,12 +17,13 @@ import matplotlib
 # matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import math
+import torch.nn.functional as F
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 class TSPDataset(Dataset):  # 初始化生成训练数据
 
-    def __init__(self, train_size=1e6, num_cars=10, iteration=20, seed=None):
+    def __init__(self, episode=1e6, num_cars=10, iteration=20, seed=None):
         super(TSPDataset, self).__init__()
 
         if seed is None:
@@ -30,19 +31,19 @@ class TSPDataset(Dataset):  # 初始化生成训练数据
 
         np.random.seed(seed)
         torch.manual_seed(seed)
-        pwr = torch.ones((train_size, num_cars, 1, iteration+1)) * 0.1  # 0.09*torch.rand((train_size, num_cars, 1, iteration)) + 0.01  #p [0.01,0.1]
-        fre = torch.ones((train_size, num_cars, 1, iteration+1)) * 2  # 1*torch.rand((train_size, num_cars, 1, iteration)) + 2  #f [2,3]
-        vel = 5 * torch.rand((train_size, num_cars, 1, iteration+1)) + 15  # v [15, 20]
-        rho = torch.rand((train_size, num_cars, 1, iteration+1))
-        rho = rho / torch.sum(rho)
+        pwr = torch.ones((episode, num_cars, 1, iteration+1)) * 0.1  # 0.09*torch.rand((episode, num_cars, 1, iteration)) + 0.01  #p [0.01,0.1]
+        fre = torch.ones((episode, num_cars, 1, iteration+1)) * 2  # 1*torch.rand((episode, num_cars, 1, iteration)) + 2  #f [2,3]
+        vel = 5 * torch.rand((episode, num_cars, 1, iteration+1)) + 15  # v [15, 20]
+        rho = torch.rand((episode, num_cars, 1, iteration+1))
+        rho = F.softmax(rho, dim=1)
         self.static = torch.cat([pwr, fre, vel, rho], 2) #（samples, cars number, (q,f,v)  iteration）
 
-        latency_itr = torch.zeros(train_size, num_cars, 1, iteration+1)
-        travel_dis = torch.zeros(train_size, num_cars, 1, iteration+1)
-        rsu_dis = torch.ones(train_size, num_cars, 1, iteration+1)*301 # math.sqrt(300**2+10**2)
+        latency_itr = torch.zeros(episode, num_cars, 1, iteration+1)
+        travel_dis = torch.zeros(episode, num_cars, 1, iteration+1)
+        rsu_dis = torch.ones(episode, num_cars, 1, iteration+1)*301 # math.sqrt(300**2+10_num_cars**2)
         self.dynamic = torch.cat([latency_itr, travel_dis, rsu_dis], 2)  #（samples, (latency, travel distance, distance), cars number）
         self.num_cars = num_cars
-        self.size = train_size
+        self.size = episode
 
 
     def __len__(self):

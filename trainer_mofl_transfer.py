@@ -124,7 +124,7 @@ def train(actor, critic, w1, w2, task, num_cars, train_data, valid_data, reward_
     now = '%s' % datetime.datetime.now().time()
     now = now.replace(':', '_')
     bname = "_transfer"
-    save_dir = os.path.join(task + bname, '%d' % num_cars, 'w_%2.2f_%2.2f' % (w1, w2), now)
+    save_dir = os.path.join(task + bname, '%d_num_cars' % num_cars, 'w_%2.2f_%2.2f' % (w1, w2), now)
 
     checkpoint_dir = os.path.join(save_dir, 'checkpoints')
     if not os.path.exists(checkpoint_dir):
@@ -243,7 +243,7 @@ def train(actor, critic, w1, w2, task, num_cars, train_data, valid_data, reward_
             # save_path = os.path.join(save_dir, 'critic.pt')
             # torch.save(critic.state_dict(), save_path)
             # 存在w_1_0主文件夹下，多存一份，用来transfer to next w
-            main_dir = os.path.join(task + bname, '%d' % num_cars, 'w_%2.2f_%2.2f' % (w1, w2))
+            main_dir = os.path.join(task + bname, '%d_num_cars' % num_cars, 'w_%2.2f_%2.2f' % (w1, w2))
             save_path = os.path.join(main_dir, 'actor.pt')
             torch.save(actor.state_dict(), save_path)
             save_path = os.path.join(main_dir, 'critic.pt')
@@ -262,9 +262,9 @@ def train_tsp(args, w1=1, w2=0, checkpoint=None):
     from tasks import flvn
     from tasks.flvn import TSPDataset
 
-    train_data = TSPDataset(args.train_size, args.num_cars, args.iteration, args.seed)
-    valid_data = TSPDataset(args.valid_size, args.num_cars, args.iteration, args.seed + 1)
-    test_data = TSPDataset(args.valid_size, args.num_cars, args.iteration, args.seed + 2)
+    train_data = TSPDataset(args.episode, args.num_cars, args.iteration, args.seed)
+    valid_data = TSPDataset(args.episode, args.num_cars, args.iteration, args.seed + 1)
+    test_data = TSPDataset(args.episode, args.num_cars, args.iteration, args.seed + 2)
 
     update_fn = None
 
@@ -289,6 +289,7 @@ def train_tsp(args, w1=1, w2=0, checkpoint=None):
     kwargs['reward_fn'] = flvn.reward
     kwargs['render_fn'] = flvn.render
 
+    # parameter transfer
     if checkpoint:
         path = os.path.join(checkpoint, 'actor.pt')
         actor.load_state_dict(torch.load(path, device))
@@ -300,7 +301,7 @@ def train_tsp(args, w1=1, w2=0, checkpoint=None):
         train_loss,train_reward,valid_reward = train(actor, critic, w1, w2, **kwargs)
 
     test_dir = 'test'
-    test_loader = DataLoader(test_data, args.valid_size, False, num_workers=0)
+    test_loader = DataLoader(test_data, args.episode, False, num_workers=0)
     out = validate(test_loader, actor, flvn.reward, w1, w2, flvn.render, test_dir, num_plot=5)
 
     print('w1=%2.2f,w2=%2.2f. Average objectives: ' % (w1, w2), out)
@@ -315,7 +316,7 @@ def train_tsp(args, w1=1, w2=0, checkpoint=None):
 
 
 if __name__ == '__main__':
-    # num_cars = 10
+    # num_cars = 10_num_cars
     parser = argparse.ArgumentParser(description='Combinatorial Optimization')
     parser.add_argument('--seed', default=12345, type=int)
     # parser.add_argument('--checkpoint', default="tsp/20/w_1_0/20_06_30.888074")
@@ -326,12 +327,11 @@ if __name__ == '__main__':
     parser.add_argument('--actor_lr', default=5e-4, type=float)
     parser.add_argument('--critic_lr', default=5e-4, type=float)
     parser.add_argument('--max_grad_norm', default=2., type=float)
-    parser.add_argument('--batch_size', default=1000, type=int) # 决定了之后tensor的第一个维度大小
+    parser.add_argument('--batch_size', default=200, type=int) # 决定了之后tensor的第一个维度大小
     parser.add_argument('--hidden', dest='hidden_size', default=128, type=int)
     parser.add_argument('--dropout', default=0.1, type=float)
     parser.add_argument('--layers', dest='num_layers', default=1, type=int)
-    parser.add_argument('--train-size', default=1000000, type=int)
-    parser.add_argument('--valid-size', default=1000, type=int)
+    parser.add_argument('--episode', default=1000, type=int)
     parser.add_argument('---iteration', default=20, type=int)
     parser.add_argument('---static_size', default=4, type=int)
     parser.add_argument('---dynamic_size', default=3, type=int)
@@ -350,7 +350,7 @@ if __name__ == '__main__':
                 train_tsp(args, 1, 0, None)
             else:
                 # Parameter transfer. train based on the parameters of the previous subproblem
-                checkpoint = 'tsp_transfer/%d/w_%2.2f_%2.2f' % (args.num_cars, 1 - w2_list[i - 1], w2_list[i - 1])
+                checkpoint = 'tsp_transfer/%d_num_cars/w_%2.2f_%2.2f' % (args.num_cars, 1 - w2_list[i - 1], w2_list[i - 1])
                 train_tsp(args, 1 - w2_list[i], w2_list[i], checkpoint)
 
         file_list = os.listdir('figure')
@@ -358,7 +358,7 @@ if __name__ == '__main__':
         for i in file_list:
             f = open('figure/' + i, 'r')
             for line in f.readlines():
-                if 'valid_reward' in line:
+                if 'train_reward' in line:
                     valid_reward_all.append(list(map(float, line.split(':')[1].split(','))))
             f.close()
 
