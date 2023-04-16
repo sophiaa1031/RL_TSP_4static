@@ -76,7 +76,8 @@ class Actor(nn.Module):
             whether_select = torch.ones(batch_size,num_cars,2).to(device)
             quant_select = self.actor2_quant(state) # (batch_size,num_cars,32)
             bdw_beforenorm = F.softmax(self.actor3_b(state), dim=2)[:,:,1]
-            bdw = bdw_beforenorm/(torch.sum(bdw_beforenorm,dim=1).unsqueeze(1).repeat(1, num_cars))  # (batch_size,num_cars,1)
+            bdw = F.softmax(bdw_beforenorm,dim=1)
+            #bdw = bdw_beforenorm/(torch.sum(bdw_beforenorm,dim=1).unsqueeze(1).repeat(1, num_cars))  # (batch_size,num_cars,1)
             whether_select_probs = F.softmax(whether_select, dim=2)  # (batch_size,num_cars,2)
             quant_probs = F.softmax(quant_select, dim=2)  # (batch_size,num_cars,32)
 

@@ -60,7 +60,7 @@ def update_mask(mask, dynamic, chosen_idx):
     return mask
 
 
-def reward(static, dynamic, action, w1=1, w2=0):
+def reward(static, dynamic, action, obj1_scaling,obj2_scaling, w1=1, w2=0):
     """
     Parameters
     ----------
@@ -100,9 +100,21 @@ def reward(static, dynamic, action, w1=1, w2=0):
     #     obj1[batch_size,iter] = obj1+torch.sum(action[:,:,0,:]/(2^action[:,:,1,:]-1)^2
 
         #obj2 = obj2+torch.max(action[0]*0.005*action[1]/static[1] + action[0]*0.01*action[1]/snr.squeeze(),dim=1)
+    if torch.max(obj1) > obj1_scaling.max:
+        obj1_scaling.set_max(torch.max(obj1))
+    if torch.min(obj1) < obj1_scaling.min:
+        obj1_scaling.set_min(torch.min(obj1))
 
-        obj[:,iter] = -w1*1e5*obj1[:, iter] - w2*obj2[:, iter] + 1e-2/num_cars*(torch.sum(rate-1, dim=1))
-    return obj.detach(), 1e5*obj1, obj2
+    if torch.max(obj2) > obj2_scaling.max:
+        obj2_scaling.set_max(torch.max(obj2))
+    if torch.min(obj2) < obj2_scaling.min:
+        obj2_scaling.set_min(torch.min(obj2))
+
+    for iter in range(iteration):
+        obj1[:, iter] = (obj1[:, iter] - obj1_scaling.min)/(obj1_scaling.max-obj1_scaling.min)
+        obj2[:, iter] = (obj2[:, iter] - obj2_scaling.min) / (obj2_scaling.max - obj2_scaling.min)
+        obj[:,iter] = -w1*obj1[:, iter] - w2*obj2[:, iter] + 1e-2/num_cars*(torch.sum(rate-1, dim=1))
+    return obj.detach(), obj1, obj2
 
 
 
@@ -143,3 +155,16 @@ def render(static, action, save_path):
 
     plt.tight_layout()
     plt.savefig(save_path, bbox_inches='tight', dpi=400)
+
+
+class RewardScaling:
+    def __init__(self,max_=-999,min_=999):
+        self.max = max_
+        self.min = min_
+
+    def set_max(self,value):
+        self.max = value
+
+    def set_min(self,value):
+        self.min = value
+
