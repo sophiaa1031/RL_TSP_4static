@@ -22,6 +22,7 @@ from model_fl import Actor
 import matplotlib
 import matplotlib.pyplot as plt
 import os
+from tasks.flvn import RewardScaling
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -117,7 +118,7 @@ def validate(data_loader, actor, reward_fn, w1, w2, render_fn=None, save_dir='.'
 
 
 def train(actor, critic, w1, w2, task, num_cars, train_data, valid_data, reward_fn,
-          render_fn, batch_size, actor_lr, critic_lr, max_grad_norm,
+          render_fn, batch_size, actor_lr, critic_lr, max_grad_norm, obj1_scaling, obj2_scaling,epoch_num,
           **kwargs):
     """Constructs the main actor & critic networks, and performs all training."""
 
@@ -143,7 +144,7 @@ def train(actor, critic, w1, w2, task, num_cars, train_data, valid_data, reward_
     train_loss = []
     train_reward = []
 
-    for epoch in range(50):
+    for epoch in range(epoch_num):
         print("epoch %d start:" % epoch)
         actor.train()  # model train -> dropout   training ->dropout 随机丢弃掉一些神经元0.3    testing  dropout 值*0.3
         critic.train()
@@ -166,7 +167,7 @@ def train(actor, critic, w1, w2, task, num_cars, train_data, valid_data, reward_
             action, action_logp = actor(static, dynamic)  # actor.forward(static, dynamic, x0)
 
             # 执行动作,计算奖励
-            reward, obj1, obj2 = reward_fn(static, dynamic, action, w1, w2)
+            reward, obj1, obj2 = reward_fn(static, dynamic, action,obj1_scaling,obj2_scaling, w1, w2)
 
             # Critic评估状态价值
             critic_est = critic(static[:,:,:,:-1], dynamic[:,:,:,:-1]).view(-1)
@@ -268,6 +269,9 @@ def train_tsp(args, w1=1, w2=0, checkpoint=None):
 
     update_fn = None
 
+    obj1_scaling = RewardScaling()
+    obj2_scaling = RewardScaling()
+
     actor = Actor(args.static_size,
                   args.dynamic_size,
                   args.hidden_size,
@@ -288,6 +292,9 @@ def train_tsp(args, w1=1, w2=0, checkpoint=None):
     kwargs['valid_data'] = valid_data
     kwargs['reward_fn'] = flvn.reward
     kwargs['render_fn'] = flvn.render
+    kwargs['obj1_scaling'] = obj1_scaling
+    kwargs['obj2_scaling'] = obj2_scaling
+    kwargs['epoch_num'] = args.epoch_num
 
     # parameter transfer
     if checkpoint:
@@ -332,10 +339,11 @@ if __name__ == '__main__':
     parser.add_argument('--dropout', default=0.1, type=float)
     parser.add_argument('--layers', dest='num_layers', default=1, type=int)
     parser.add_argument('--episode', default=1000, type=int)
-    parser.add_argument('---iteration', default=20, type=int)
-    parser.add_argument('---static_size', default=4, type=int)
-    parser.add_argument('---dynamic_size', default=3, type=int)
-    parser.add_argument('---subproblem_size', default=5, type=int)
+    parser.add_argument('--iteration', default=20, type=int)
+    parser.add_argument('--static_size', default=4, type=int)
+    parser.add_argument('--dynamic_size', default=3, type=int)
+    parser.add_argument('--subproblem_size', default=5, type=int)
+    parser.add_argument('--epoch_num', default=5, type=int)
 
     args = parser.parse_args()
 
