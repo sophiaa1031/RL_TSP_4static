@@ -143,7 +143,7 @@ def train(actor, critic, w1, w2, task, num_cars, train_data, valid_data, reward_
     train_loss = []
     train_reward = []
 
-    for epoch in range(20):
+    for epoch in range(50):
         print("epoch %d start:" % epoch)
         actor.train()  # model train -> dropout   training ->dropout 随机丢弃掉一些神经元0.3    testing  dropout 值*0.3
         critic.train()
@@ -175,10 +175,10 @@ def train(actor, critic, w1, w2, task, num_cars, train_data, valid_data, reward_
             advantage = (reward.view(-1) - critic_est)
 
             # Actor参数更新
-            actor_loss1 = torch.mean(advantage.detach() * action_logp[:,:,0,:].sum(dim=1).view(-1))  # 计算Actor的损失函数
+            # actor_loss1 = torch.mean(advantage.detach() * action_logp[:,:,0,:].sum(dim=1).view(-1))  # 计算Actor的损失函数
             actor_loss2 = torch.mean(advantage.detach() * action_logp[:, :, 1, :].sum(dim=1).view(-1))  # 计算Actor的损失函数
             actor_loss3 = torch.mean(advantage.detach() * action_logp[:, :, 2, :].sum(dim=1).view(-1))  # 计算Actor的损失函数
-            actor_loss = actor_loss1 + actor_loss2 + actor_loss3
+            actor_loss = actor_loss2 + actor_loss3
             actor_optim.zero_grad()
             actor_loss.backward()  # 反向传播计算梯度
             torch.nn.utils.clip_grad_norm_(actor.parameters(), max_grad_norm)
@@ -326,11 +326,11 @@ if __name__ == '__main__':
     parser.add_argument('--actor_lr', default=5e-4, type=float)
     parser.add_argument('--critic_lr', default=5e-4, type=float)
     parser.add_argument('--max_grad_norm', default=2., type=float)
-    parser.add_argument('--batch_size', default=200, type=int) # 决定了之后tensor的第一个维度大小
+    parser.add_argument('--batch_size', default=1000, type=int) # 决定了之后tensor的第一个维度大小
     parser.add_argument('--hidden', dest='hidden_size', default=128, type=int)
     parser.add_argument('--dropout', default=0.1, type=float)
     parser.add_argument('--layers', dest='num_layers', default=1, type=int)
-    parser.add_argument('--train-size', default=1000, type=int)
+    parser.add_argument('--train-size', default=1000000, type=int)
     parser.add_argument('--valid-size', default=1000, type=int)
     parser.add_argument('---iteration', default=20, type=int)
     parser.add_argument('---static_size', default=4, type=int)
