@@ -17,6 +17,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader
+
 torch.autograd.set_detect_anomaly(True)
 from model_fl import Actor
 import matplotlib
@@ -38,15 +39,15 @@ class StateCritic(nn.Module):
     the encoder + decoder, and returns an estimate of complexity
     """
 
-    def __init__(self, static_size, dynamic_size, hidden_size,num_cars):
+    def __init__(self, static_size, dynamic_size, hidden_size, num_cars):
         super(StateCritic, self).__init__()
 
-        self.static_encoder = nn.Linear(static_size*num_cars, hidden_size)
-        self.dynamic_encoder = nn.Linear(dynamic_size*num_cars, hidden_size)
+        self.static_encoder = nn.Linear(static_size * num_cars, hidden_size)
+        self.dynamic_encoder = nn.Linear(dynamic_size * num_cars, hidden_size)
         self.static_bn = torch.nn.BatchNorm2d(static_size, eps=1e-05)
         self.dynamic_bn = torch.nn.BatchNorm2d(dynamic_size, eps=1e-05)
         # Define the encoder & decoder models
-        self.fc1 = nn.Linear(hidden_size*2,hidden_size)
+        self.fc1 = nn.Linear(hidden_size * 2, hidden_size)
         self.fc2 = nn.Linear(hidden_size, 1)
 
         for p in self.parameters():
@@ -58,9 +59,8 @@ class StateCritic(nn.Module):
         static = static.view(batch_size * num_cars, features, steps)
         static = self.static_bn(static.unsqueeze(2))  # Add a singleton dimension for 'height' and apply BN
         static = static.squeeze(2)  # Remove the singleton dimension for 'height'
-        static = static.view(batch_size, num_cars*features, steps)
-        static_hidden = self.static_encoder(static.transpose(2,1))
-
+        static = static.view(batch_size, num_cars * features, steps)
+        static_hidden = self.static_encoder(static.transpose(2, 1))
 
         batch_size, num_cars, features, steps = dynamic.shape
         dynamic = dynamic.view(batch_size * num_cars, features,
@@ -68,9 +68,8 @@ class StateCritic(nn.Module):
         # BatchNorm2d along feature dimension
         dynamic = self.dynamic_bn(dynamic.unsqueeze(2))  # Add a singleton dimension for 'height' and apply BN
         dynamic = dynamic.squeeze(2)  # Remove the singleton dimension for 'height'
-        dynamic = dynamic.view(batch_size, num_cars*features, steps)
-        dynamic_hidden = self.dynamic_encoder(dynamic.transpose(2,1))
-
+        dynamic = dynamic.view(batch_size, num_cars * features, steps)
+        dynamic_hidden = self.dynamic_encoder(dynamic.transpose(2, 1))
 
         hidden = torch.cat((static_hidden, dynamic_hidden), 2)
 
@@ -81,7 +80,7 @@ class StateCritic(nn.Module):
 
 # def update_fn(action,y):
 
-def validate(data_loader, actor, reward_fn, w1, w2, render_fn=None, save_dir='.',
+def validate(data_loader, actor, reward_fn, w1, w2, obj1_scaling, obj2_scaling, render_fn=None, save_dir='.',
              num_plot=5):
     """Used to monitor progress on a validation set & optionally plot solution."""
 
@@ -103,7 +102,7 @@ def validate(data_loader, actor, reward_fn, w1, w2, render_fn=None, save_dir='.'
         with torch.no_grad():
             action, _ = actor(static, dynamic)
 
-        reward, obj1, obj2 = reward_fn(static, dynamic, action, w1, w2)
+        reward, obj1, obj2 = reward_fn(static, dynamic, action, obj1_scaling, obj2_scaling, w1, w2)
 
         rewards.append(torch.mean(reward.detach()).item())
         obj1s.append(torch.mean(obj1.detach()).item())
@@ -118,7 +117,7 @@ def validate(data_loader, actor, reward_fn, w1, w2, render_fn=None, save_dir='.'
 
 
 def train(actor, critic, w1, w2, task, num_cars, train_data, valid_data, reward_fn,
-          render_fn, batch_size, actor_lr, critic_lr, max_grad_norm, obj1_scaling, obj2_scaling,epoch_num,
+          render_fn, batch_size, actor_lr, critic_lr, max_grad_norm, obj1_scaling, obj2_scaling, epoch,
           **kwargs):
     """Constructs the main actor & critic networks, and performs all training."""
 
@@ -127,9 +126,9 @@ def train(actor, critic, w1, w2, task, num_cars, train_data, valid_data, reward_
     bname = "_transfer"
     save_dir = os.path.join(task + bname, '%d_num_cars' % num_cars, 'w_%2.2f_%2.2f' % (w1, w2), now)
 
-    checkpoint_dir = os.path.join(save_dir, 'checkpoints')
-    if not os.path.exists(checkpoint_dir):
-        os.makedirs(checkpoint_dir)
+    # checkpoint_dir = os.path.join(save_dir, 'checkpoints')
+    # if not os.path.exists(checkpoint_dir):
+    #     os.makedirs(checkpoint_dir)
 
     actor_optim = optim.Adam(actor.parameters(), lr=actor_lr)
     critic_optim = optim.Adam(critic.parameters(), lr=critic_lr)
@@ -144,7 +143,7 @@ def train(actor, critic, w1, w2, task, num_cars, train_data, valid_data, reward_
     train_loss = []
     train_reward = []
 
-    for epoch in range(epoch_num):
+    for epoch in range(epoch):
         print("epoch %d start:" % epoch)
         actor.train()  # model train -> dropout   training ->dropout 随机丢弃掉一些神经元0.3    testing  dropout 值*0.3
         critic.train()
@@ -167,10 +166,10 @@ def train(actor, critic, w1, w2, task, num_cars, train_data, valid_data, reward_
             action, action_logp = actor(static, dynamic)  # actor.forward(static, dynamic, x0)
 
             # 执行动作,计算奖励
-            reward, obj1, obj2 = reward_fn(static, dynamic, action,obj1_scaling,obj2_scaling, w1, w2)
+            reward, obj1, obj2 = reward_fn(static, dynamic, action, obj1_scaling, obj2_scaling, w1, w2)
 
             # Critic评估状态价值
-            critic_est = critic(static[:,:,:,:-1], dynamic[:,:,:,:-1]).view(-1)
+            critic_est = critic(static[:, :, :, :-1], dynamic[:, :, :, :-1]).view(-1)
 
             # 计算优势函数
             advantage = (reward.view(-1) - critic_est)
@@ -231,7 +230,8 @@ def train(actor, critic, w1, w2, task, num_cars, train_data, valid_data, reward_
 
         # Save rendering of validation set tours
         # valid_dir = os.path.join(save_dir, '%s' % epoch)
-        mean_valid, mean_obj1_valid, mean_obj2_valid = validate(valid_loader, actor, reward_fn, w1, w2, render_fn,
+        mean_valid, mean_obj1_valid, mean_obj2_valid = validate(valid_loader, actor, reward_fn, w1, w2, obj1_scaling,
+                                                                obj2_scaling, render_fn,
                                                                 '.', num_plot=5)
         valid_reward.append(mean_valid)
         # Save best model parameters
@@ -255,11 +255,10 @@ def train(actor, critic, w1, w2, task, num_cars, train_data, valid_data, reward_
               (mean_loss, mean_reward, mean_valid, mean_obj1_valid, mean_obj2_valid, time.time() - epoch_start,
                np.mean(times)))
     print("Total run time of epoches: %2.4f" % (time.time() - start_total))
-    return train_loss,train_reward,valid_reward
+    return train_loss, train_reward, valid_reward
 
 
 def train_tsp(args, w1=1, w2=0, checkpoint=None):
-
     from tasks import flvn
     from tasks.flvn import TSPDataset
 
@@ -294,7 +293,7 @@ def train_tsp(args, w1=1, w2=0, checkpoint=None):
     kwargs['render_fn'] = flvn.render
     kwargs['obj1_scaling'] = obj1_scaling
     kwargs['obj2_scaling'] = obj2_scaling
-    kwargs['epoch_num'] = args.epoch_num
+    kwargs['epoch'] = args.epoch
 
     # parameter transfer
     if checkpoint:
@@ -305,14 +304,16 @@ def train_tsp(args, w1=1, w2=0, checkpoint=None):
         critic.load_state_dict(torch.load(path, device))
 
     if not args.test:
-        train_loss,train_reward,valid_reward = train(actor, critic, w1, w2, **kwargs)
+        train_loss, train_reward, valid_reward = train(actor, critic, w1, w2, **kwargs)
 
     test_dir = 'test'
     test_loader = DataLoader(test_data, args.episode, False, num_workers=0)
-    out = validate(test_loader, actor, flvn.reward, w1, w2, flvn.render, test_dir, num_plot=5)
+    out = validate(test_loader, actor, flvn.reward, w1, w2, obj1_scaling, obj2_scaling, flvn.render, test_dir,
+                   num_plot=5)
 
     print('w1=%2.2f,w2=%2.2f. Average objectives: ' % (w1, w2), out)
-    f = open('figure/{:.2f}_{:.2f}.txt'.format(w1,w2),'w')
+
+    f = open('figure/reward/{:.2f}_{:.2f}.txt'.format(w1,w2),'w')
     f.write('train_loss:')
     f.write(','.join(map(str,train_loss)))
     f.write('\ntrain_reward:')
@@ -334,16 +335,16 @@ if __name__ == '__main__':
     parser.add_argument('--actor_lr', default=5e-4, type=float)
     parser.add_argument('--critic_lr', default=5e-4, type=float)
     parser.add_argument('--max_grad_norm', default=2., type=float)
-    parser.add_argument('--batch_size', default=200, type=int) # 决定了之后tensor的第一个维度大小
+    parser.add_argument('--batch_size', default=1024 * 8, type=int)  # GPU上限1024*8
     parser.add_argument('--hidden', dest='hidden_size', default=128, type=int)
     parser.add_argument('--dropout', default=0.1, type=float)
     parser.add_argument('--layers', dest='num_layers', default=1, type=int)
-    parser.add_argument('--episode', default=1000, type=int)
+    parser.add_argument('--episode', default=100000, type=int)
     parser.add_argument('--iteration', default=20, type=int)
     parser.add_argument('--static_size', default=4, type=int)
     parser.add_argument('--dynamic_size', default=3, type=int)
     parser.add_argument('--subproblem_size', default=5, type=int)
-    parser.add_argument('--epoch_num', default=5, type=int)
+    parser.add_argument('--epoch', default=5, type=int)
 
     args = parser.parse_args()
 
@@ -354,17 +355,18 @@ if __name__ == '__main__':
             if i == 0:
                 # The first subproblem can be trained from scratch. It also can be trained based on a
                 # single-TSP trained model, where the model can be obtained from everywhere in github
-                checkpoint = 'tsp_transfer_100run_500000_5epoch_40city/40/w_1.00_0.00'
                 train_tsp(args, 1, 0, None)
             else:
                 # Parameter transfer. train based on the parameters of the previous subproblem
-                checkpoint = 'tsp_transfer/%d_num_cars/w_%2.2f_%2.2f' % (args.num_cars, 1 - w2_list[i - 1], w2_list[i - 1])
+                checkpoint = 'tsp_transfer/%d_num_cars/w_%2.2f_%2.2f' % (
+                args.num_cars, 1 - w2_list[i - 1], w2_list[i - 1])
                 train_tsp(args, 1 - w2_list[i], w2_list[i], checkpoint)
 
-        file_list = os.listdir('figure')
+        # 画图
+        file_list = os.listdir('figure/reward')
         valid_reward_all = []
         for i in file_list:
-            f = open('figure/' + i, 'r')
+            f = open('figure/reward/' + i, 'r')
             for line in f.readlines():
                 if 'train_reward' in line:
                     valid_reward_all.append(list(map(float, line.split(':')[1].split(','))))
