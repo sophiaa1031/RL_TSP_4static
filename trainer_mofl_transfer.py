@@ -24,6 +24,9 @@ import matplotlib
 import matplotlib.pyplot as plt
 import os
 from tasks.flvn import RewardScaling
+from tasks import flvn
+from tasks.flvn import TSPDataset
+import random
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -117,7 +120,7 @@ def validate(data_loader, actor, reward_fn, w1, w2, obj1_scaling, obj2_scaling, 
 
 
 def train(actor, critic, w1, w2, task, num_cars, train_data, valid_data, reward_fn,
-          render_fn, batch_size, actor_lr, critic_lr, max_grad_norm, obj1_scaling, obj2_scaling, epoch,
+          render_fn, batch_size, actor_lr, critic_lr, max_grad_norm, obj1_scaling, obj2_scaling, epoch,args,
           **kwargs):
     """Constructs the main actor & critic networks, and performs all training."""
 
@@ -153,6 +156,11 @@ def train(actor, critic, w1, w2, task, num_cars, train_data, valid_data, reward_
 
         epoch_start = time.time()
         start = epoch_start
+
+        change_in_every_epoch = True
+        if change_in_every_epoch == True:
+            train_data = TSPDataset(args.episode, args.num_cars, args.iteration, random.randint(0,100000))
+            train_loader = DataLoader(train_data, batch_size, True, num_workers=0)
 
         for batch_idx, batch in enumerate(train_loader):
 
@@ -259,8 +267,6 @@ def train(actor, critic, w1, w2, task, num_cars, train_data, valid_data, reward_
 
 
 def train_tsp(args, w1=1, w2=0, checkpoint=None):
-    from tasks import flvn
-    from tasks.flvn import TSPDataset
 
     train_data = TSPDataset(args.episode, args.num_cars, args.iteration, args.seed)
     valid_data = TSPDataset(args.episode, args.num_cars, args.iteration, args.seed + 1)
@@ -294,6 +300,7 @@ def train_tsp(args, w1=1, w2=0, checkpoint=None):
     kwargs['obj1_scaling'] = obj1_scaling
     kwargs['obj2_scaling'] = obj2_scaling
     kwargs['epoch'] = args.epoch
+    kwargs['args'] = args
 
     # parameter transfer
     if checkpoint:
