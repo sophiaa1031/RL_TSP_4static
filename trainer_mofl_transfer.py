@@ -27,6 +27,9 @@ from tasks.flvn import RewardScaling
 from tasks import flvn
 from tasks.flvn import TSPDataset
 import random
+from plots import plot_reward
+from plots import plot_time
+from plots import plot_pf
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -120,7 +123,7 @@ def validate(data_loader, actor, reward_fn, w1, w2, obj1_scaling, obj2_scaling, 
 
 
 def train(actor, critic, w1, w2, task, num_cars, train_data, valid_data, reward_fn,
-          render_fn, batch_size, actor_lr, critic_lr, max_grad_norm, obj1_scaling, obj2_scaling, epoch,args,
+          render_fn, batch_size, actor_lr, critic_lr, max_grad_norm, obj1_scaling, obj2_scaling, epoch,change_in_every_epoch,episode,iteration,
           **kwargs):
     """Constructs the main actor & critic networks, and performs all training."""
 
@@ -129,9 +132,9 @@ def train(actor, critic, w1, w2, task, num_cars, train_data, valid_data, reward_
     bname = "_transfer"
     save_dir = os.path.join(task + bname, '%d_num_cars' % num_cars, 'w_%2.2f_%2.2f' % (w1, w2), now)
 
-    # checkpoint_dir = os.path.join(save_dir, 'checkpoints')
-    # if not os.path.exists(checkpoint_dir):
-    #     os.makedirs(checkpoint_dir)
+    checkpoint_dir = os.path.join(save_dir, 'checkpoints')
+    if not os.path.exists(checkpoint_dir):
+        os.makedirs(checkpoint_dir)
 
     actor_optim = optim.Adam(actor.parameters(), lr=actor_lr)
     critic_optim = optim.Adam(critic.parameters(), lr=critic_lr)
@@ -157,9 +160,8 @@ def train(actor, critic, w1, w2, task, num_cars, train_data, valid_data, reward_
         epoch_start = time.time()
         start = epoch_start
 
-        change_in_every_epoch = True
         if change_in_every_epoch == True:
-            train_data = TSPDataset(args.episode, args.num_cars, args.iteration, random.randint(0,100000))
+            train_data = TSPDataset(episode, num_cars, iteration, random.randint(0,100000))
             train_loader = DataLoader(train_data, batch_size, True, num_workers=0)
 
         for batch_idx, batch in enumerate(train_loader):
@@ -224,20 +226,6 @@ def train(actor, critic, w1, w2, task, num_cars, train_data, valid_data, reward_
         mean_reward = np.mean(rewards)
         train_loss.append(mean_loss)
         train_reward.append(mean_reward)
-
-        # Save the weights
-        # epoch_dir = os.path.join(checkpoint_dir, '%s' % epoch)
-        # if not os.path.exists(epoch_dir):
-        #     os.makedirs(epoch_dir)
-        #
-        # save_path = os.path.join(epoch_dir, 'actor.pt')
-        # torch.save(actor.state_dict(), save_path)
-        #
-        # save_path = os.path.join(epoch_dir, 'critic.pt')
-        # torch.save(critic.state_dict(), save_path)
-
-        # Save rendering of validation set tours
-        # valid_dir = os.path.join(save_dir, '%s' % epoch)
         mean_valid, mean_obj1_valid, mean_obj2_valid = validate(valid_loader, actor, reward_fn, w1, w2, obj1_scaling,
                                                                 obj2_scaling, render_fn,
                                                                 '.', num_plot=5)
@@ -246,25 +234,25 @@ def train(actor, critic, w1, w2, task, num_cars, train_data, valid_data, reward_
         if mean_valid < best_reward:
             best_reward = mean_valid
 
-            # save_path = os.path.join(save_dir, 'actor.pt')
-            # torch.save(actor.state_dict(), save_path)
-            #
-            # save_path = os.path.join(save_dir, 'critic.pt')
-            # torch.save(critic.state_dict(), save_path)
             # 存在w_1_0主文件夹下，多存一份，用来transfer to next w
             main_dir = os.path.join(task + bname, '%d_num_cars' % num_cars, 'w_%2.2f_%2.2f' % (w1, w2))
             save_path = os.path.join(main_dir, 'actor.pt')
             torch.save(actor.state_dict(), save_path)
             save_path = os.path.join(main_dir, 'critic.pt')
             torch.save(critic.state_dict(), save_path)
+            print('Saving the weight', main_dir)
 
         print('Mean epoch loss/reward/valid: %2.4f, %2.4f, %2.4f, obj1_valid: %2.3f, obj2_valid: %2.3f. took: %2.4fs ' \
               '(%2.4fs / 100 batches)' % \
               (mean_loss, mean_reward, mean_valid, mean_obj1_valid, mean_obj2_valid, time.time() - epoch_start,
                np.mean(times)))
-    print("Total run time of epoches: %2.4f" % (time.time() - start_total))
-    return train_loss, train_reward, valid_reward
 
+    total_time = time.time() - start_total
+    print("Total run time of epoches: %2.4f" % (total_time))
+    # 存time画图
+    f = open('figure/time.txt', 'a')
+    f.write('{:.4f}'.format(total_time)+',')
+    return train_loss, train_reward, valid_reward
 
 def train_tsp(args, w1=1, w2=0, checkpoint=None):
 
@@ -299,8 +287,10 @@ def train_tsp(args, w1=1, w2=0, checkpoint=None):
     kwargs['render_fn'] = flvn.render
     kwargs['obj1_scaling'] = obj1_scaling
     kwargs['obj2_scaling'] = obj2_scaling
-    kwargs['epoch'] = args.epoch
-    kwargs['args'] = args
+    # kwargs['epoch'] = args.epoch
+    # kwargs['change_in_every_epoch'] = args.change_in_every_epoch
+    # kwargs['episode'] = args.episode
+    # kwargs['iteration'] = args.iteration
 
     # parameter transfer
     if checkpoint:
@@ -309,6 +299,7 @@ def train_tsp(args, w1=1, w2=0, checkpoint=None):
         # actor.static_encoder.state_dict().get("conv.weight").size()
         path = os.path.join(checkpoint, 'critic.pt')
         critic.load_state_dict(torch.load(path, device))
+        print('Now loading the weight in ', checkpoint)
 
     if not args.test:
         train_loss, train_reward, valid_reward = train(actor, critic, w1, w2, **kwargs)
@@ -319,7 +310,9 @@ def train_tsp(args, w1=1, w2=0, checkpoint=None):
                    num_plot=5)
 
     print('w1=%2.2f,w2=%2.2f. Average objectives: ' % (w1, w2), out)
+    print("")
 
+    # 存reward画图
     f = open('figure/reward/{:.2f}_{:.2f}.txt'.format(w1,w2),'w')
     f.write('train_loss:')
     f.write(','.join(map(str,train_loss)))
@@ -327,8 +320,11 @@ def train_tsp(args, w1=1, w2=0, checkpoint=None):
     f.write(','.join(map(str,train_reward)))
     f.write('\nvalid_reward:')
     f.write(','.join(map(str,valid_reward)))
-    print('')
 
+    # 存optimal value画图
+    f = open('figure/optimalvalue.txt', 'a')
+    f.write('{:.4f}'.format(out[1])+',')
+    f.write('{:.4f}\n'.format(out[2]))
 
 if __name__ == '__main__':
     # num_cars = 10_num_cars
@@ -342,45 +338,40 @@ if __name__ == '__main__':
     parser.add_argument('--actor_lr', default=5e-4, type=float)
     parser.add_argument('--critic_lr', default=5e-4, type=float)
     parser.add_argument('--max_grad_norm', default=2., type=float)
-    parser.add_argument('--batch_size', default=1024 * 8, type=int)  # GPU上限1024*8
+    parser.add_argument('--batch_size', default=500, type=int)  # GPU上限1024*8
     parser.add_argument('--hidden', dest='hidden_size', default=128, type=int)
     parser.add_argument('--dropout', default=0.1, type=float)
     parser.add_argument('--layers', dest='num_layers', default=1, type=int)
-    parser.add_argument('--episode', default=100000, type=int)
-    parser.add_argument('--iteration', default=20, type=int)
+    parser.add_argument('--episode', default=1000, type=int)
+    parser.add_argument('--iteration', default=40, type=int)
     parser.add_argument('--static_size', default=4, type=int)
     parser.add_argument('--dynamic_size', default=3, type=int)
     parser.add_argument('--subproblem_size', default=5, type=int)
-    parser.add_argument('--epoch', default=5, type=int)
+    parser.add_argument('--epoch', default=2, type=int)
+    parser.add_argument('--change_in_every_epoch', default=True, type=bool)
+
 
     args = parser.parse_args()
 
     if args.task == 'tsp':
-        w2_list = np.arange(args.subproblem_size + 1) / args.subproblem_size
+        w2_list = 1 - np.arange(args.subproblem_size + 1) / args.subproblem_size
+        f = open('figure/time.txt', 'w')
+        f = open('figure/optimalvalue.txt', 'w')
         for i in range(0, args.subproblem_size + 1):
             print("Current w:%2.2f/%2.2f" % (1 - w2_list[i], w2_list[i]))
             if i == 0:
                 # The first subproblem can be trained from scratch. It also can be trained based on a
                 # single-TSP trained model, where the model can be obtained from everywhere in github
-                train_tsp(args, 1, 0, None)
+                checkpoint = None
             else:
                 # Parameter transfer. train based on the parameters of the previous subproblem
-                checkpoint = 'tsp_transfer/%d_num_cars/w_%2.2f_%2.2f' % (
-                args.num_cars, 1 - w2_list[i - 1], w2_list[i - 1])
-                train_tsp(args, 1 - w2_list[i], w2_list[i], checkpoint)
+                checkpoint = 'tsp_transfer/%d_num_cars/w_%2.2f_%2.2f' % (args.num_cars, 1 - w2_list[i - 1], w2_list[i - 1])
+            train_tsp(args, 1 - w2_list[i], w2_list[i], checkpoint)
+
+        # 测试（0.5，0.5）
+        train_tsp(args, 0.5, 0.5, 'tsp_transfer/%d_num_cars/w_%2.2f_%2.2f' % (args.num_cars, 1 - w2_list[-1], w2_list[-1]))
 
         # 画图
-        file_list = os.listdir('figure/reward')
-        valid_reward_all = []
-        for i in file_list:
-            f = open('figure/reward/' + i, 'r')
-            for line in f.readlines():
-                if 'train_reward' in line:
-                    valid_reward_all.append(list(map(float, line.split(':')[1].split(','))))
-            f.close()
-
-        for count in range(len(file_list)):
-            plt.plot(range(len(valid_reward_all[count])),
-                     valid_reward_all[count])
-            plt.title(file_list[count])
-            plt.show()
+        plot_reward()
+        plot_time()
+        plot_pf()

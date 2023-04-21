@@ -39,7 +39,6 @@ class Actor(nn.Module):
         whether_select_lst, quant_select_lst, b_lst = [], [], []
         whether_select_logp, quant_select_logp, b_logp = [], [], []
 
-
         # batch_size, num_cars, features, steps = static.shape
         # static = static.view(batch_size * num_cars, features, steps)
         # static = self.static_bn(static.unsqueeze(2))  # Add a singleton dimension for 'height' and apply BN
@@ -58,6 +57,7 @@ class Actor(nn.Module):
             # 更新state网络层
             static_temp = static[:, :, :, step]
             batch_size, num_cars, features = static_temp.shape
+            t_comp = (torch.ones(batch_size, num_cars) * 0.05).to(device)
             static_temp = static_temp.view(batch_size * num_cars, features)
             static_temp = self.static_bn(static_temp)  # Add a singleton dimension for 'height' and apply BN
             static_temp = static_temp.view(batch_size, num_cars, features)
@@ -100,16 +100,16 @@ class Actor(nn.Module):
                 ptr_quant = ptr_quant + 8 # 量化程度为[8,16]
                 # save the maximum latency in the last iteration
                 rate = bdw.detach() * 10 * torch.log2(1+1e7 * static[:, :, 0, step].clone() * torch.pow(dynamic[:, :, 2, step].clone(), -2))
-                dynamic_0, _ = torch.max(0.002 * ptr_quant.clone()/static[:,:,1,step].clone() + ptr_quant.clone()/32 / rate, dim=1)  # (batch_size)
+                dynamic_0, _ = torch.max(t_comp + ptr_quant.clone()/32 / rate, dim=1)  # (batch_size)
                 # dynamic_0, _ = torch.max(0.002 * ptr_select.clone() * ptr_quant.clone() / static[:, :, 1,step].clone() + ptr_select.clone() * ptr_quant.clone() /
                 #    (320 * bdw.detach() * torch.log2(1 + (1e7 * static[:, :, 0, step].clone() / (dynamic[:, :, 2, step].clone() * dynamic[:, :, 2,step].clone())))),dim=1)  # (batch_size)
                 dynamic_0 = dynamic_0.unsqueeze(1)  # (batch_size,1)
                 # update the current travel distance
                 dynamic_1 = torch.mul(dynamic_0, static[:, :, 2, step].clone()) + dynamic[:, :, 1, step].clone()
-                # update the distance from the RSU
-                dynamic_2 = dynamic_1 + 0.005 * ptr_quant
-                dynamic_2 = torch.sqrt(torch.pow(dynamic_2 - 300,2)+10**2)
-                if torch.any(dynamic_2>301):
+                # update the distance from the RSU, add computation time
+                dynamic_2 = dynamic_1 + torch.mul(t_comp, static[:, :, 2, step].clone())
+                dynamic_2 = torch.sqrt(torch.pow(dynamic_2 - 500,2)+10**2)
+                if torch.any(dynamic_2>501):
                     print('1')
                 dynamic[:, :, :, step + 1] = torch.cat([dynamic_0.repeat(1, num_cars).unsqueeze(2),
                                                         dynamic_1.unsqueeze(2),
