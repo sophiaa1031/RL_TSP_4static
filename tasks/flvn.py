@@ -85,8 +85,8 @@ def reward(static, dynamic, action, obj1_scaling,obj2_scaling, w1=1, w2=0):
     obj = torch.zeros([batch_size, iteration]).to(device)
     t_comp = (torch.ones(batch_size, num_cars) * 0.05).to(device)
     for iter in range(iteration):
-        # dis = dynamic[:, :, 2, iter]
-        # rate = action[:, :, 2, iter]*10*torch.log2(1+1e7*static[:,:,0,iter]*torch.pow(dis, -2))
+        dis = dynamic[:, :, 2, iter+1]
+        rate = action[:, :, 2, iter]*10*torch.log2(1+1e7*static[:,:,0,iter]*torch.pow(dis, -2))
         if iter == 0:
             obj1[:, iter] = torch.sum(static[:, :, 3, iter+1]/
                                                torch.pow(torch.pow(2, action[:, :, 1, iter]) - 1,2), dim=1)
