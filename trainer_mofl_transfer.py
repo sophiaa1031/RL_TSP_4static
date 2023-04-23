@@ -132,9 +132,9 @@ def train(actor, critic, w1, w2, task, num_cars, train_data, valid_data, reward_
     bname = "_transfer"
     save_dir = os.path.join(task + bname, '%d_num_cars' % num_cars, 'w_%2.2f_%2.2f' % (w1, w2), now)
 
-    checkpoint_dir = os.path.join(save_dir, 'checkpoints')
-    if not os.path.exists(checkpoint_dir):
-        os.makedirs(checkpoint_dir)
+    # checkpoint_dir = os.path.join(save_dir, 'checkpoints')
+    # if not os.path.exists(checkpoint_dir):
+    #     os.makedirs(checkpoint_dir)
 
     actor_optim = optim.Adam(actor.parameters(), lr=actor_lr)
     critic_optim = optim.Adam(critic.parameters(), lr=critic_lr)
@@ -338,16 +338,16 @@ if __name__ == '__main__':
     parser.add_argument('--actor_lr', default=5e-4, type=float)
     parser.add_argument('--critic_lr', default=5e-4, type=float)
     parser.add_argument('--max_grad_norm', default=2., type=float)
-    parser.add_argument('--batch_size', default=500, type=int)  # GPU上限1024*8
+    parser.add_argument('--batch_size', default=1024*8, type=int)  # GPU上限1024*8
     parser.add_argument('--hidden', dest='hidden_size', default=128, type=int)
     parser.add_argument('--dropout', default=0.1, type=float)
     parser.add_argument('--layers', dest='num_layers', default=1, type=int)
-    parser.add_argument('--episode', default=1000, type=int)
+    parser.add_argument('--episode', default=1024*8*2, type=int)
     parser.add_argument('--iteration', default=40, type=int)
     parser.add_argument('--static_size', default=4, type=int)
     parser.add_argument('--dynamic_size', default=3, type=int)
-    parser.add_argument('--subproblem_size', default=5, type=int)
-    parser.add_argument('--epoch', default=2, type=int)
+    parser.add_argument('--subproblem_size', default=10, type=int)
+    parser.add_argument('--epoch', default=40, type=int)
     parser.add_argument('--change_in_every_epoch', default=True, type=bool)
 
 

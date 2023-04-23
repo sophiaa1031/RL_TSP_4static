@@ -33,16 +33,17 @@ class TSPDataset(Dataset):  # 初始化生成训练数据
         torch.manual_seed(seed)
         pwr = torch.ones((episode, num_cars, 1, iteration+1)) * 0.1  # 0.09*torch.rand((episode, num_cars, 1, iteration)) + 0.01  #p [0.01,0.1]
         fre = torch.ones((episode, num_cars, 1, iteration+1)) * 2  # 1*torch.rand((episode, num_cars, 1, iteration)) + 2  #f [2,3]
-        vel = 5 * torch.rand((episode, num_cars, 1, iteration+1)) + 15  # v [15, 20]
-        rho = torch.rand((episode, num_cars, 1, iteration+1))
-        rho = F.softmax(rho, dim=1)
+        vel = 15 * torch.rand((episode, num_cars, 1, iteration+1)) + 15  # v [15, 25]
+        rho = torch.ones((episode, num_cars, 1, iteration+1)) * 1 / num_cars
+        # rho = torch.rand((episode, num_cars, 1, iteration+1))
+        # rho = F.softmax(rho, dim=1)
         self.static = torch.cat([pwr, fre, vel, rho], 2) #（samples, cars number, (q,f,v)  iteration）
 
         latency_itr = torch.zeros(episode, num_cars, 1, iteration+1)
         travel_dis = torch.zeros(episode, num_cars, 1, iteration+1)
-        # travel_dis[episode, num_cars, 1, 0] = torch.rand(episode, num_cars, 1) * 500
+        travel_dis[:, :, :, 0] = torch.rand(episode, num_cars, 1) * 500
         rsu_dis = torch.zeros(episode, num_cars, 1, iteration+1) # math.sqrt(300**2+10_num_cars**2)
-        # rsu_dis[episode, num_cars, 1, 0] = torch.sqrt(torch.pow(travel_dis[episode, num_cars, 1, 0] - 500,2)+10**2) # math.sqrt(300**2+10_num_cars**2)
+        rsu_dis[:, :, :, 0] = torch.sqrt(torch.pow(travel_dis[:, :, :, 0] - 500,2)+10**2) # math.sqrt(300**2+10_num_cars**2)
         self.dynamic = torch.cat([latency_itr, travel_dis, rsu_dis], 2)  #（samples, (latency, travel distance, distance), cars number）
         self.num_cars = num_cars
         self.size = episode
@@ -84,20 +85,22 @@ def reward(static, dynamic, action, obj1_scaling,obj2_scaling, w1=1, w2=0):
     obj = torch.zeros([batch_size, iteration]).to(device)
     t_comp = (torch.ones(batch_size, num_cars) * 0.05).to(device)
     for iter in range(iteration):
-        dis = dynamic[:, :, 2, iter]
-        rate = action[:, :, 2, iter]*10*torch.log2(1+1e7*static[:,:,0,iter]*torch.pow(dis, -2))
+        # dis = dynamic[:, :, 2, iter]
+        # rate = action[:, :, 2, iter]*10*torch.log2(1+1e7*static[:,:,0,iter]*torch.pow(dis, -2))
         if iter == 0:
-            obj1[:, iter] = torch.sum(static[:, :, 3, iter]/
+            obj1[:, iter] = torch.sum(static[:, :, 3, iter+1]/
                                                torch.pow(torch.pow(2, action[:, :, 1, iter]) - 1,2), dim=1)
-            obj2_temp = t_comp + action[:, :, 1, iter]/32/rate
-            obj2[:, iter],idx = torch.max(obj2_temp,dim=1)
+            # obj2_temp = t_comp + action[:, :, 1, iter]/32/rate
+            # obj2[:, iter],idx = torch.max(obj2_temp,dim=1)
+            obj2[:, iter] = dynamic[:, :, 0, iter+1][:,0]
 
         else:
-            obj1[:, iter] = obj1[:, iter-1] + torch.sum(static[:, :, 3, iter]/
+            obj1[:, iter] = obj1[:, iter-1] + torch.sum(static[:, :, 3, iter+1]/
                                                torch.pow(torch.pow(2, action[:, :, 1, iter]) - 1,2), 1)
-            obj2_temp = t_comp + action[:, :, 1, iter]/32/rate
-            obj2[:, iter], idx = torch.max(obj2_temp, dim=1)
-            obj2[:, iter] = obj2[:, iter] + obj2[:, iter - 1]
+            # obj2_temp = t_comp + action[:, :, 1, iter]/32/rate
+            # obj2[:, iter], idx = torch.max(obj2_temp, dim=1)
+            # obj2[:, iter] = obj2[:, iter] + obj2[:, iter - 1]
+            obj2[:, iter] = obj2[:, iter - 1] + dynamic[:, :, 0, iter+1][:,0]
     #     obj1[batch_size,iter] = obj1+torch.sum(action[:,:,0,:]/(2^action[:,:,1,:]-1)^2
 
         #obj2 = obj2+torch.max(action[0]*0.005*action[1]/static[1] + action[0]*0.01*action[1]/snr.squeeze(),dim=1)
