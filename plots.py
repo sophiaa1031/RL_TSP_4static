@@ -57,3 +57,29 @@ def plot_pf():
     plt.title('Pareto Front')
     # 显示图形
     plt.show()
+
+def plot_v_f1f2():
+    import matplotlib.pyplot as plt
+    import numpy as np
+    f = open('figure/optimalvalue_v.txt', 'r')
+    y1 = np.array([])
+    y2 = np.array([])
+    for line in f.readlines():
+        data = line.replace('\n', '').split(',')
+        data = list(map(float, data))
+        y1 = np.append(y1, data[0])
+        y2 = np.append(y2, data[1])
+    x = [8,13,18,23,28]
+
+    fig, axs = plt.subplots(1, 2, figsize=(10, 4))
+
+    axs[0].plot(x, y1)
+    axs[0].set_xlabel('v')
+    axs[0].set_ylabel('f1')
+    axs[0].set_title('Subplot 1')
+    axs[1].plot(x, y2)
+    axs[1].set_xlabel('v')
+    axs[1].set_ylabel('f2')
+    axs[1].set_title('Subplot 2')
+
+    plt.show()

@@ -19,7 +19,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 
 torch.autograd.set_detect_anomaly(True)
-from model_fl import Actor
+from agents.paddpg import Actor,Critic
 import os
 from tasks.flvn import RewardScaling
 from tasks import flvn
@@ -36,51 +36,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 # device = torch.device('cpu')
 
 
-class StateCritic(nn.Module):
-    # 根据输入的状态输出状态的价值
-    """Estimates the problem complexity.
 
-    This is a basic module that just looks at the log-probabilities predicted by
-    the encoder + decoder, and returns an estimate of complexity
-    """
-
-    def __init__(self, static_size, dynamic_size, hidden_size, num_cars):
-        super(StateCritic, self).__init__()
-
-        self.static_encoder = nn.Linear(static_size * num_cars, hidden_size)
-        self.dynamic_encoder = nn.Linear(dynamic_size * num_cars, hidden_size)
-        self.static_bn = torch.nn.BatchNorm2d(static_size, eps=1e-05)
-        self.dynamic_bn = torch.nn.BatchNorm2d(dynamic_size, eps=1e-05)
-        # Define the encoder & decoder models
-        self.fc1 = nn.Linear(hidden_size * 2, hidden_size)
-        self.fc2 = nn.Linear(hidden_size, 1)
-
-        for p in self.parameters():
-            if len(p.shape) > 1:
-                nn.init.xavier_uniform_(p)
-
-    def forward(self, static, dynamic):
-        batch_size, num_cars, features, steps = static.shape
-        static = static.view(batch_size * num_cars, features, steps)
-        static = self.static_bn(static.unsqueeze(2))  # Add a singleton dimension for 'height' and apply BN
-        static = static.squeeze(2)  # Remove the singleton dimension for 'height'
-        static = static.view(batch_size, num_cars * features, steps)
-        static_hidden = self.static_encoder(static.transpose(2, 1))
-
-        batch_size, num_cars, features, steps = dynamic.shape
-        dynamic = dynamic.view(batch_size * num_cars, features,
-                               steps)  # Reshape to [batch_size*num_cars, features, steps]
-        # BatchNorm2d along feature dimension
-        dynamic = self.dynamic_bn(dynamic.unsqueeze(2))  # Add a singleton dimension for 'height' and apply BN
-        dynamic = dynamic.squeeze(2)  # Remove the singleton dimension for 'height'
-        dynamic = dynamic.view(batch_size, num_cars * features, steps)
-        dynamic_hidden = self.dynamic_encoder(dynamic.transpose(2, 1))
-
-        hidden = torch.cat((static_hidden, dynamic_hidden), 2)
-
-        output = F.relu(self.fc1(hidden))
-        output = self.fc2(output).squeeze()
-        return output
 
 
 # def update_fn(action,y):
@@ -177,7 +133,8 @@ def train(actor, critic, w1, w2, v_min, task, num_cars, train_data, valid_data, 
             reward, obj1, obj2 = reward_fn(static, dynamic, action, obj1_scaling, obj2_scaling, w1, w2)
 
             # Critic评估状态价值
-            critic_est = critic(static[:, :, :, :-1], dynamic[:, :, :, :-1]).view(-1)
+            critic_est = critic(static[:, :, :, :-1], dynamic[:, :, :, :-1],
+                                ).view(-1)
 
             # 计算优势函数
             advantage = (reward.view(-1) - critic_est)
@@ -266,16 +223,17 @@ def train_tsp(args, w1=1, w2=0, checkpoint=None,v_min=8):
 
     actor = Actor(args.static_size,
                   args.dynamic_size,
+                  args.action_size,
+                  args.action_parameter_size,
                   args.hidden_size,
                   update_fn,
-                  flvn.update_mask,
-                  args.num_layers,
-                  args.dropout,
                   args.iteration,
                   args.num_cars).to(device)  # 定义一个Actor模型
 
-    critic = StateCritic(args.static_size,
+    critic = Critic(args.static_size,
                          args.dynamic_size,
+                         args.action_size,
+                         args.action_parameter_size,
                          args.hidden_size,
                          args.num_cars).to(device)  # 定义一个Critic模型
 
@@ -339,6 +297,8 @@ def train_tsp_final(args, w1=0.5, w2=0.5, checkpoint=None,v_min=8):
 
     actor = Actor(args.static_size,
                   args.dynamic_size,
+                  args.action_size,
+                  args.action_parameter_size,
                   args.hidden_size,
                   update_fn,
                   flvn.update_mask,
@@ -347,8 +307,10 @@ def train_tsp_final(args, w1=0.5, w2=0.5, checkpoint=None,v_min=8):
                   args.iteration,
                   args.num_cars).to(device)  # 定义一个Actor模型
 
-    critic = StateCritic(args.static_size,
+    critic = Critic(args.static_size,
                          args.dynamic_size,
+                         args.action_size,
+                         args.action_parameter_size,
                          args.hidden_size,
                          args.num_cars).to(device)  # 定义一个Critic模型
 
@@ -423,6 +385,8 @@ if __name__ == '__main__':
     parser.add_argument('--iteration', default=20, type=int)
     parser.add_argument('--static_size', default=4, type=int)
     parser.add_argument('--dynamic_size', default=3, type=int)
+    parser.add_argument('--action_size', default=8, type=int)
+    parser.add_argument('--action_parameter_size', default=8, type=int)
     parser.add_argument('--subproblem_size', default=5, type=int)
     parser.add_argument('--epoch', default=20, type=int)
     parser.add_argument('--change_in_every_epoch', default=True, type=bool)
